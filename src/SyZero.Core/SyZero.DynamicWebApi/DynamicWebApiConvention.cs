@@ -244,6 +244,11 @@ namespace SyZero.DynamicWebApi
         {
             var memberInfo = action.ActionMethod.GetInterfaceMemberInfo();
 
+            if (memberInfo == null)
+            {
+                memberInfo = action.ActionMethod;
+            }
+
             return _nonDynamicMethodCache.GetOrAdd(memberInfo, mi =>
             {
                 // 检查 NonDynamicMethodAttribute

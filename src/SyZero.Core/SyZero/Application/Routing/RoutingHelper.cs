@@ -17,6 +17,12 @@ namespace SyZero.Application.Routing
         {
             MemberInfo method = member.GetInterfaceMemberInfo();
 
+            // 如果未找到接口成员，回退到使用原始成员
+            if (method == null)
+            {
+                method = member;
+            }
+
             var apiMethod = method.GetCustomAttribute<HttpMethodAttribute>();
 
             return apiMethod?.Method ?? System.Net.Http.HttpMethod.Get;
@@ -25,6 +31,12 @@ namespace SyZero.Application.Routing
         public static string GetHttpTemplateV2(MemberInfo member)
         {
             MemberInfo method = member.GetInterfaceMemberInfo();
+
+            // 如果未找到接口成员，回退到使用原始成员
+            if (method == null)
+            {
+                method = member;
+            }
 
             var apiMethod = method.GetCustomAttribute<HttpMethodAttribute>();
 

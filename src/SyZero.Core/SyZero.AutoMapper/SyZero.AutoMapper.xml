@@ -4,14 +4,51 @@
         <name>SyZero.AutoMapper</name>
     </assembly>
     <members>
+        <member name="T:SyZero.AutoMapper.ObjectMapper">
+            <summary>
+            AutoMapper 对象映射器实现
+            </summary>
+        </member>
+        <member name="M:SyZero.AutoMapper.ObjectMapper.#ctor(AutoMapper.IMapper)">
+            <summary>
+            初始化 ObjectMapper
+            </summary>
+            <param name="mapper">AutoMapper IMapper 实例</param>
+        </member>
+        <member name="M:SyZero.AutoMapper.ObjectMapper.Map``1(System.Object)">
+            <inheritdoc />
+        </member>
+        <member name="M:SyZero.AutoMapper.ObjectMapper.Map``2(``0,``1)">
+            <inheritdoc />
+        </member>
+        <member name="T:SyZero.SyZeroAutoMapperExtension">
+            <summary>
+            SyZero AutoMapper 扩展方法
+            </summary>
+        </member>
         <member name="M:SyZero.SyZeroAutoMapperExtension.AddSyZeroAutoMapper(Microsoft.Extensions.DependencyInjection.IServiceCollection)">
             <summary>
-            AutoMapperModule
+            添加 SyZero AutoMapper 服务（自动扫描所有程序集）
             </summary>
-            <typeparam name="TContext"></typeparam>
-            <param name="builder"></param>
-            <param name="configuration"></param>
-            <returns></returns>
+            <param name="services">服务集合</param>
+            <returns>服务集合</returns>
+        </member>
+        <member name="M:SyZero.SyZeroAutoMapperExtension.AddSyZeroAutoMapper(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Reflection.Assembly[])">
+            <summary>
+            添加 SyZero AutoMapper 服务（指定程序集）
+            </summary>
+            <param name="services">服务集合</param>
+            <param name="assemblies">要扫描的程序集</param>
+            <returns>服务集合</returns>
+        </member>
+        <member name="M:SyZero.SyZeroAutoMapperExtension.AddSyZeroAutoMapper(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{AutoMapper.IMapperConfigurationExpression},System.Reflection.Assembly[])">
+            <summary>
+            添加 SyZero AutoMapper 服务（自定义配置）
+            </summary>
+            <param name="services">服务集合</param>
+            <param name="configAction">AutoMapper 配置委托</param>
+            <param name="assemblies">要扫描的程序集</param>
+            <returns>服务集合</returns>
         </member>
     </members>
 </doc>

@@ -53,9 +53,8 @@
     <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.11.1" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.11.0" />
     <!-- AutoMapper -->
-    <PackageVersion Include="AutoMapper" Version="9.0.0" />
-    <PackageVersion Include="AutoMapper.Collection" Version="6.0.0" />
-    <PackageVersion Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="7.0.0" />
+    <PackageVersion Include="AutoMapper" Version="13.0.1" />
+    <PackageVersion Include="AutoMapper.Collection" Version="10.0.0" />
     <!-- Logging -->
     <PackageVersion Include="log4net" Version="2.0.10" />
     <!-- HTTP & Serialization -->

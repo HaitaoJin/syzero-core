@@ -91,9 +91,9 @@ namespace SyZero
                 return connection;
             });
             //注册上下文
-            services.AddScoped<ISyZeroDbContext, TContext>();
+            services.AddTransient<ISyZeroDbContext, TContext>();
             //注册仓储泛型
-            services.AddClassesAsImplementedInterface(typeof(IRepository<>));
+            services.AddClassesAsImplementedInterface(typeof(IRepository<>), ServiceLifetime.Scoped);
             services.AddScoped(typeof(IRepository<>), typeof(SqlSugarRepository<>));
             ////注册持久化
             services.AddScoped<IUnitOfWork, UnitOfWork>();

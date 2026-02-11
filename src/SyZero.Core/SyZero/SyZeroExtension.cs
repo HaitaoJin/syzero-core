@@ -184,6 +184,12 @@ namespace SyZero
             foreach (var type in syZeroServiceBaseTypes)
             {
                 services.AddScoped(type);
+                
+                var interfaceType = type.GetInterfaces().FirstOrDefault(i => i.Name == "I" + type.Name);
+                if (interfaceType != null)
+                {
+                    services.AddScoped(interfaceType, provider => provider.GetService(type));
+                }
             }
 
             return services;

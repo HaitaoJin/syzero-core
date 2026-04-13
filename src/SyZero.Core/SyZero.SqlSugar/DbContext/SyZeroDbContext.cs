@@ -69,7 +69,7 @@ namespace SyZero.SqlSugar.DbContext
                 }
             }
             var content = $"\r\nsql : 执行本次SQL消耗 {sqlExecutionTime} 毫秒,执行 SQL 内容如下:\r\n{sql};\n";
-            _logger.LogInformation(content);
+            _logger.LogDebug(content);
         }
     }
 }

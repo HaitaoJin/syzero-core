@@ -13,22 +13,14 @@ dotnet add package SyZero.AutoMapper
 - 🚀 **自动扫描** - 自动扫描并注册所有 Profile
 - 💾 **依赖注入** - 无缝集成 Microsoft DI
 - 🔒 **类型安全** - 编译时类型检查
+- 📦 **集合映射** - 内置 AutoMapper.Collection 支持
+- 🎯 **多目标框架** - 支持 net8.0、net9.0
 
 ---
 
 ## 🚀 快速开始
 
-### 1. 配置 appsettings.json
-
-```json
-{
-  "AutoMapper": {
-    "AssembliesToScan": ["MyApp.Application"]
-  }
-}
-```
-
-### 2. 注册服务
+### 注册服务
 
 ```csharp
 // Program.cs
@@ -36,17 +28,24 @@ var builder = WebApplication.CreateBuilder(args);
 // 添加SyZero
 builder.AddSyZero();
 
-// 注册服务方式1 - 自动扫描当前程序集
+// 方式1 - 自动扫描所有程序集
 builder.Services.AddSyZeroAutoMapper();
 
-// 注册服务方式2 - 指定程序集
+// 方式2 - 指定程序集
 builder.Services.AddSyZeroAutoMapper(typeof(UserProfile).Assembly);
 
-// 注册服务方式3 - 多个程序集
+// 方式3 - 多个程序集
 builder.Services.AddSyZeroAutoMapper(
     typeof(UserProfile).Assembly,
     typeof(OrderProfile).Assembly
 );
+
+// 方式4 - 自定义配置
+builder.Services.AddSyZeroAutoMapper(cfg =>
+{
+    cfg.AllowNullCollections = true;
+    cfg.AllowNullDestinationValues = false;
+}, typeof(UserProfile).Assembly);
 
 var app = builder.Build();
 // 使用SyZero
@@ -54,7 +53,7 @@ app.UseSyZero();
 app.Run();
 ```
 
-### 3. 使用示例
+### 使用示例
 
 ```csharp
 public class UserProfile : Profile
@@ -63,14 +62,18 @@ public class UserProfile : Profile
     {
         CreateMap<User, UserDto>();
         CreateMap<CreateUserInput, User>();
+        
+        // 集合映射（由 AutoMapper.Collection 提供）
+        CreateMap<User, UserDto>()
+            .EqualityComparison((src, dest) => src.Id == dest.Id);
     }
 }
 
 public class UserService
 {
-    private readonly IMapper _mapper;
+    private readonly IObjectMapper _mapper;
 
-    public UserService(IMapper mapper)
+    public UserService(IObjectMapper mapper)
     {
         _mapper = mapper;
     }
@@ -79,28 +82,33 @@ public class UserService
     {
         return _mapper.Map<UserDto>(user);
     }
+    
+    public void UpdateUser(UserDto dto, User user)
+    {
+        _mapper.Map(dto, user);
+    }
 }
 ```
 
 ---
 
-## 📖 配置选项
-
-| 属性 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `AssembliesToScan` | `string[]` | `[]` | 要扫描的程序集名称 |
-
----
-
 ## 📖 API 说明
 
-### IMapper 接口
+### IObjectMapper 接口（SyZero 抽象）
+
+| 方法 | 说明 |
+|------|------|
+| `Map<TDestination>(source)` | 将源对象映射到目标类型 |
+| `Map<TSource, TDestination>(source, dest)` | 映射到现有对象 |
+
+### IMapper 接口（AutoMapper 原生）
 
 | 方法 | 说明 |
 |------|------|
 | `Map<TDestination>(source)` | 将源对象映射到目标类型 |
 | `Map<TSource, TDestination>(source, dest)` | 映射到现有对象 |
 | `Map(source, sourceType, destType)` | 动态类型映射 |
+| `ProjectTo<TDestination>(queryable)` | IQueryable 投影映射 |
 
 > 所有映射操作都是线程安全的
 

@@ -1,30 +1,79 @@
 @echo off
-set nowPath=%cd%
-cd \
-cd %nowPath%
-echo 开始生成
+setlocal enabledelayedexpansion
 
-del /f /s /q %USERPROFILE%\.nuget\packages\SyZero
+echo ========================================
+echo       NuGet Cache Cleanup Tool
+echo ========================================
+echo.
 
-del /f /s /q %USERPROFILE%\.nuget\packages\SyZero.ApiGateway
+set "NUGET_CACHE=%USERPROFILE%\.nuget\packages"
+set "SCRIPT_DIR=%~dp0"
+set "COUNT=0"
 
-del /f /s /q %USERPROFILE%\.nuget\packages\SyZero.AspNetCore
+echo Scanning directory: %SCRIPT_DIR%
+echo Cache directory: %NUGET_CACHE%
+echo.
+echo Starting cache cleanup...
+echo ----------------------------------------
 
-del /f /s /q %USERPROFILE%\.nuget\packages\SyZero.AutoMapper
+:: Loop through all .nupkg and .snupkg files in current directory
+for %%f in ("%SCRIPT_DIR%*.nupkg" "%SCRIPT_DIR%*.snupkg") do (
+    if exist "%%f" (
+        set "filename=%%~nf"
+        
+        for /f "tokens=1,2,3,4,5 delims=." %%a in ("!filename!") do (
+            set "part1=%%a"
+            set "part2=%%b"
+            set "part3=%%c"
+            set "part4=%%d"
+            set "part5=%%e"
+        )
+        
+        call :ExtractPackageName "!filename!"
+    )
+)
 
-del /f /s /q %USERPROFILE%\.nuget\packages\SyZero.Consul
+echo ----------------------------------------
+echo Cleaned !COUNT! package caches
+echo ========================================
+echo Done!
+pause
+exit /b
 
-del /f /s /q %USERPROFILE%\.nuget\packages\SyZero.EntityFrameworkCore
+:ExtractPackageName
+set "fullname=%~1"
+set "pkgname="
 
-del /f /s /q %USERPROFILE%\.nuget\packages\SyZero.Log4Net
+for /f "tokens=1,* delims=." %%a in ("%fullname%") do (
+    set "firstpart=%%a"
+    set "rest=%%b"
+)
 
-del /f /s /q %USERPROFILE%\.nuget\packages\SyZero.MongoDB
+set "pkgname=%firstpart%"
+set "remaining=%rest%"
 
-del /f /s /q %USERPROFILE%\.nuget\packages\SyZero.Nacos
+:BuildName
+if "%remaining%"=="" goto :DoClean
+for /f "tokens=1,* delims=." %%a in ("%remaining%") do (
+    set "current=%%a"
+    set "remaining=%%b"
+    
+    echo !current!| findstr /r "^[0-9]" >nul
+    if errorlevel 1 (
+        set "pkgname=!pkgname!.!current!"
+        goto :BuildName
+    )
+)
 
-del /f /s /q %USERPROFILE%\.nuget\packages\SyZero.Redis
-
-del /f /s /q %USERPROFILE%\.nuget\packages\SyZero.Web.Common
-
-echo 完成
-Pause
+:DoClean
+if not "!pkgname!"=="" (
+    set "cachepath=%NUGET_CACHE%\!pkgname!"
+    if exist "!cachepath!" (
+        echo Cleaning: !pkgname!
+        rd /s /q "!cachepath!" 2>nul
+        set /a COUNT+=1
+    ) else (
+        echo Skipped: !pkgname! ^(cache not found^)
+    )
+)
+exit /b

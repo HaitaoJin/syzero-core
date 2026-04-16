@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
-VisualStudioVersion = 18.2.11415.280 d18.0
+VisualStudioVersion = 18.2.11415.280
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SyZero.Core", "SyZero.Core", "{8EEDACC2-BBB6-4002-8CC4-06E922F29ECD}"
 EndProject
@@ -70,6 +70,8 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SyZero.Tests", "SyZero.Tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SyZero.Tests", "SyZero.Tests\SyZero.Tests.csproj", "{06DD9F21-1241-8ED8-E2DA-15F210769856}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SyZero.AspNetCore.SpaProxy", "SyZero.Core\SyZero.AspNetCore.SpaProxy\SyZero.AspNetCore.SpaProxy.csproj", "{5D8A68A6-EE11-F25B-BC90-8E273D7F7FA6}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -417,6 +419,18 @@ Global
 		{06DD9F21-1241-8ED8-E2DA-15F210769856}.Release|x64.Build.0 = Release|Any CPU
 		{06DD9F21-1241-8ED8-E2DA-15F210769856}.Release|x86.ActiveCfg = Release|Any CPU
 		{06DD9F21-1241-8ED8-E2DA-15F210769856}.Release|x86.Build.0 = Release|Any CPU
+		{5D8A68A6-EE11-F25B-BC90-8E273D7F7FA6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5D8A68A6-EE11-F25B-BC90-8E273D7F7FA6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5D8A68A6-EE11-F25B-BC90-8E273D7F7FA6}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{5D8A68A6-EE11-F25B-BC90-8E273D7F7FA6}.Debug|x64.Build.0 = Debug|Any CPU
+		{5D8A68A6-EE11-F25B-BC90-8E273D7F7FA6}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{5D8A68A6-EE11-F25B-BC90-8E273D7F7FA6}.Debug|x86.Build.0 = Debug|Any CPU
+		{5D8A68A6-EE11-F25B-BC90-8E273D7F7FA6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5D8A68A6-EE11-F25B-BC90-8E273D7F7FA6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5D8A68A6-EE11-F25B-BC90-8E273D7F7FA6}.Release|x64.ActiveCfg = Release|Any CPU
+		{5D8A68A6-EE11-F25B-BC90-8E273D7F7FA6}.Release|x64.Build.0 = Release|Any CPU
+		{5D8A68A6-EE11-F25B-BC90-8E273D7F7FA6}.Release|x86.ActiveCfg = Release|Any CPU
+		{5D8A68A6-EE11-F25B-BC90-8E273D7F7FA6}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -452,6 +466,7 @@ Global
 		{784701D7-628E-23DF-B7F9-B0ABA8E0ACA9} = {8EEDACC2-BBB6-4002-8CC4-06E922F29ECD}
 		{C6425FF2-BFA7-BC8F-C744-BD03F6D2320A} = {8EEDACC2-BBB6-4002-8CC4-06E922F29ECD}
 		{06DD9F21-1241-8ED8-E2DA-15F210769856} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{5D8A68A6-EE11-F25B-BC90-8E273D7F7FA6} = {8EEDACC2-BBB6-4002-8CC4-06E922F29ECD}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {7668E53B-AA87-498A-A3C0-6B7888DDCEFB}

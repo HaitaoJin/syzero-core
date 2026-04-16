@@ -45,6 +45,25 @@
           EnvironmentVariables="SWAGGER_INPUT_FILE=$(TargetDir)swagger.json;CONFIGURATION=$(Configuration)" />
   </Target>
 
+  <Target Name="SyZeroConfigureSpaProxyRunEnvironment" BeforeTargets="ComputeRunArguments"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(SpaProxyServerUrl)' != '' and '$(SpaProxyLaunchCommand)' != '' and '$(TargetFrameworkIdentifier)' == '.NETCoreApp' and '$(_IsExecutable)' == 'true'">
+    <PropertyGroup>
+      <_SyZeroSpaProxyOriginalRunCommand>$(RunCommand)</_SyZeroSpaProxyOriginalRunCommand>
+      <_SyZeroSpaProxyOriginalRunArguments>$(RunArguments)</_SyZeroSpaProxyOriginalRunArguments>
+      <_SyZeroSpaProxyHostingStartupAssembly>SyZero.AspNetCore.SpaProxy</_SyZeroSpaProxyHostingStartupAssembly>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+      <RunCommand>cmd.exe</RunCommand>
+      <RunArguments>/c &quot;set &quot;ASPNETCORE_HOSTINGSTARTUPASSEMBLIES=$(_SyZeroSpaProxyHostingStartupAssembly);%ASPNETCORE_HOSTINGSTARTUPASSEMBLIES%&quot; &amp;&amp; &quot;$(_SyZeroSpaProxyOriginalRunCommand)&quot; $(_SyZeroSpaProxyOriginalRunArguments)&quot;</RunArguments>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+      <RunCommand>/bin/sh</RunCommand>
+      <RunArguments>-c &quot;ASPNETCORE_HOSTINGSTARTUPASSEMBLIES='$(_SyZeroSpaProxyHostingStartupAssembly);${ASPNETCORE_HOSTINGSTARTUPASSEMBLIES}' exec \&quot;$(_SyZeroSpaProxyOriginalRunCommand)\&quot; $(_SyZeroSpaProxyOriginalRunArguments)&quot;</RunArguments>
+    </PropertyGroup>
+  </Target>
+
   <Target Name="SyZeroCopyFrontendToPublish" AfterTargets="Publish"
           Condition="'$(DesignTimeBuild)' != 'true' and '$(BuildFrontendOnBuild)' == 'true' and Exists('$(FrontendDistDir)')">
     <ItemGroup>

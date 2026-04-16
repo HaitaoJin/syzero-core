@@ -35,7 +35,7 @@ namespace SyZero.AspNetCore.SpaProxy
 
         public Task StopAsync(CancellationToken cancellationToken)
         {
-            return Task.CompletedTask;
+            return _launchManager.StopServerAsync(cancellationToken);
         }
     }
 }

@@ -24,6 +24,8 @@ namespace SyZero.AspNetCore.SpaProxy
         private readonly Lazy<SpaProxyServerInfo?> _serverInfo;
         private readonly ILogger<SpaProxyLaunchManager> _logger;
         private readonly SemaphoreSlim _launchLock = new SemaphoreSlim(1, 1);
+        private readonly object _processLock = new object();
+        private Process? _launchedProcess;
 
         public SpaProxyLaunchManager(IWebHostEnvironment environment, ILogger<SpaProxyLaunchManager> logger)
         {
@@ -73,14 +75,92 @@ namespace SyZero.AspNetCore.SpaProxy
             }
         }
 
+        public async Task StopServerAsync(CancellationToken cancellationToken)
+        {
+            var serverInfo = ServerInfo;
+            if (serverInfo == null || serverInfo.KeepRunning)
+            {
+                return;
+            }
+
+            Process? processToStop = null;
+            lock (_processLock)
+            {
+                if (_launchedProcess != null)
+                {
+                    processToStop = _launchedProcess;
+                    _launchedProcess = null;
+                }
+            }
+
+            if (processToStop == null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!processToStop.HasExited)
+                {
+                    _logger.LogInformation("Stopping SPA development server process {ProcessId}.", processToStop.Id);
+                    processToStop.Kill(entireProcessTree: true);
+                    await processToStop.WaitForExitAsync(cancellationToken);
+                }
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to stop SPA development server process.");
+            }
+            finally
+            {
+                processToStop.Dispose();
+            }
+        }
+
         private void LaunchSpaProcess(SpaProxyServerInfo serverInfo)
         {
+            lock (_processLock)
+            {
+                if (_launchedProcess != null && !_launchedProcess.HasExited)
+                {
+                    return;
+                }
+            }
+
             var startInfo = BuildProcessStartInfo(serverInfo);
             _logger.LogInformation("Starting SPA development server with command '{Command}' in '{WorkingDirectory}'.", serverInfo.LaunchCommand, serverInfo.WorkingDirectory);
 
-            using var process = new Process();
-            process.StartInfo = startInfo;
-            process.Start();
+            var process = new Process
+            {
+                StartInfo = startInfo,
+                EnableRaisingEvents = true
+            };
+            process.Exited += HandleLaunchedProcessExited;
+
+            try
+            {
+                process.Start();
+            }
+            catch
+            {
+                process.Exited -= HandleLaunchedProcessExited;
+                process.Dispose();
+                throw;
+            }
+
+            lock (_processLock)
+            {
+                _launchedProcess = process;
+            }
+
+            _logger.LogInformation("Started SPA development server process {ProcessId}.", process.Id);
         }
 
         private static ProcessStartInfo BuildProcessStartInfo(SpaProxyServerInfo serverInfo)
@@ -239,6 +319,45 @@ namespace SyZero.AspNetCore.SpaProxy
 
             propertyValue = default;
             return false;
+        }
+
+        private void HandleLaunchedProcessExited(object? sender, EventArgs args)
+        {
+            if (sender is not Process process)
+            {
+                return;
+            }
+
+            var exitCode = 0;
+            try
+            {
+                if (process.HasExited)
+                {
+                    exitCode = process.ExitCode;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+            }
+
+            var shouldDispose = false;
+            lock (_processLock)
+            {
+                if (ReferenceEquals(_launchedProcess, process))
+                {
+                    _launchedProcess = null;
+                    shouldDispose = true;
+                }
+            }
+
+            if (!shouldDispose)
+            {
+                return;
+            }
+
+            _logger.LogInformation("SPA development server process {ProcessId} exited with code {ExitCode}.", process.Id, exitCode);
+            process.Exited -= HandleLaunchedProcessExited;
+            process.Dispose();
         }
     }
 }

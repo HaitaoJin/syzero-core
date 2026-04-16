@@ -9,6 +9,7 @@
     <PropertyGroup>
       <_SpaProxyServerLaunchConfig>$(IntermediateOutputPath)spa.proxy.json</_SpaProxyServerLaunchConfig>
       <_SpaRootFullPath>$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(SpaRoot)'))).Replace('\','\\'))</_SpaRootFullPath>
+      <_SpaProxyKeepRunningJson>$([System.String]::Copy('$(SpaProxyKeepRunning)').ToLowerInvariant())</_SpaProxyKeepRunningJson>
     </PropertyGroup>
     <ItemGroup>
       <_SpaProxyServerLaunchConfigLines Include="{" />
@@ -18,8 +19,8 @@
       <_SpaProxyServerLaunchConfigLines Include="    &quot;RedirectUrl&quot;: &quot;$(SpaProxyServerUrl)&quot;," Condition="'$(SpaProxyRedirectUrl)' == ''" />
       <_SpaProxyServerLaunchConfigLines Include="    &quot;LaunchCommand&quot;: &quot;$(SpaProxyLaunchCommand)&quot;," />
       <_SpaProxyServerLaunchConfigLines Include="    &quot;WorkingDirectory&quot;: &quot;$(_SpaRootFullPath)&quot;," />
-      <_SpaProxyServerLaunchConfigLines Include="    &quot;MaxTimeoutInSeconds&quot;: &quot;$(SpaProxyTimeoutInSeconds)&quot;," />
-      <_SpaProxyServerLaunchConfigLines Include="    &quot;KeepRunning&quot;: &quot;$(SpaProxyKeepRunning)&quot;" />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;MaxTimeoutInSeconds&quot;: $(SpaProxyTimeoutInSeconds)," />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;KeepRunning&quot;: $(_SpaProxyKeepRunningJson)" />
       <_SpaProxyServerLaunchConfigLines Include="  }" />
       <_SpaProxyServerLaunchConfigLines Include="}" />
     </ItemGroup>

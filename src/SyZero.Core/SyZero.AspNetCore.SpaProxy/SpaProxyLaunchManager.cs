@@ -146,13 +146,99 @@ namespace SyZero.AspNetCore.SpaProxy
                     continue;
                 }
 
-                return JsonSerializer.Deserialize<SpaProxyServerInfo>(serverElement.GetRawText(), new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+                return ParseServerInfo(serverElement);
             }
 
             return null;
+        }
+
+        private static SpaProxyServerInfo ParseServerInfo(JsonElement serverElement)
+        {
+            var serverInfo = new SpaProxyServerInfo
+            {
+                ServerUrl = GetString(serverElement, nameof(SpaProxyServerInfo.ServerUrl)),
+                RedirectUrl = GetString(serverElement, nameof(SpaProxyServerInfo.RedirectUrl)),
+                LaunchCommand = GetString(serverElement, nameof(SpaProxyServerInfo.LaunchCommand)),
+                WorkingDirectory = GetString(serverElement, nameof(SpaProxyServerInfo.WorkingDirectory)),
+                MaxTimeoutInSeconds = GetInt32(serverElement, nameof(SpaProxyServerInfo.MaxTimeoutInSeconds), 120),
+                KeepRunning = GetBoolean(serverElement, nameof(SpaProxyServerInfo.KeepRunning))
+            };
+
+            return serverInfo;
+        }
+
+        private static string GetString(JsonElement element, string propertyName)
+        {
+            if (!TryGetProperty(element, propertyName, out var propertyValue))
+            {
+                return string.Empty;
+            }
+
+            return propertyValue.ValueKind == JsonValueKind.String
+                ? propertyValue.GetString() ?? string.Empty
+                : propertyValue.ToString();
+        }
+
+        private static int GetInt32(JsonElement element, string propertyName, int defaultValue)
+        {
+            if (!TryGetProperty(element, propertyName, out var propertyValue))
+            {
+                return defaultValue;
+            }
+
+            if (propertyValue.ValueKind == JsonValueKind.Number && propertyValue.TryGetInt32(out var numericValue))
+            {
+                return numericValue;
+            }
+
+            if (propertyValue.ValueKind == JsonValueKind.String &&
+                int.TryParse(propertyValue.GetString(), out var stringValue))
+            {
+                return stringValue;
+            }
+
+            return defaultValue;
+        }
+
+        private static bool GetBoolean(JsonElement element, string propertyName)
+        {
+            if (!TryGetProperty(element, propertyName, out var propertyValue))
+            {
+                return false;
+            }
+
+            if (propertyValue.ValueKind == JsonValueKind.True)
+            {
+                return true;
+            }
+
+            if (propertyValue.ValueKind == JsonValueKind.False)
+            {
+                return false;
+            }
+
+            if (propertyValue.ValueKind == JsonValueKind.String &&
+                bool.TryParse(propertyValue.GetString(), out var stringValue))
+            {
+                return stringValue;
+            }
+
+            return false;
+        }
+
+        private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement propertyValue)
+        {
+            foreach (var jsonProperty in element.EnumerateObject())
+            {
+                if (string.Equals(jsonProperty.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    propertyValue = jsonProperty.Value;
+                    return true;
+                }
+            }
+
+            propertyValue = default;
+            return false;
         }
     }
 }

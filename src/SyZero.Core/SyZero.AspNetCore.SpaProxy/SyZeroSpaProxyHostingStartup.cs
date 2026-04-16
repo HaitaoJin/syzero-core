@@ -10,6 +10,7 @@ namespace SyZero.AspNetCore.SpaProxy
             builder.ConfigureServices(services =>
             {
                 services.AddSingleton<SpaProxyLaunchManager>();
+                services.AddHostedService<SpaProxyLaunchHostedService>();
                 services.AddSingleton<IStartupFilter, SpaProxyStartupFilter>();
             });
         }

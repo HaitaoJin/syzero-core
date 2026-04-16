@@ -48,16 +48,14 @@ namespace SyZero.MongoDB
         #endregion
 
         #region Count
-        [Obsolete]
         public long Count(Expression<Func<TEntity, bool>> where)
         {
-            return _collection.Count(where);
+            return _collection.CountDocuments(where);
         }
 
-        [Obsolete]
         public async Task<long> CountAsync(Expression<Func<TEntity, bool>> where, CancellationToken cancellationToken = default(CancellationToken))
         {
-            return await _collection.CountAsync(where, null, cancellationToken);
+            return await _collection.CountDocumentsAsync(where, cancellationToken: cancellationToken);
         }
         #endregion
 
@@ -199,96 +197,92 @@ namespace SyZero.MongoDB
 
         TEntity IBaseRepository<TEntity, long>.Add(TEntity entity)
         {
-            throw new NotImplementedException();
+            return Add(entity);
         }
 
         Task<TEntity> IBaseRepository<TEntity, long>.AddAsync(TEntity entity, CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            return AddAsync(entity, cancellationToken);
         }
 
         int IBaseRepository<TEntity, long>.AddList(IQueryable<TEntity> entities)
         {
-            throw new NotImplementedException();
+            return AddList(entities);
         }
 
         Task<int> IBaseRepository<TEntity, long>.AddListAsync(IQueryable<TEntity> entities, CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            return AddListAsync(entities, cancellationToken);
         }
-
-
 
         int IBaseRepository<TEntity, long>.Count(Expression<Func<TEntity, bool>> where)
         {
-            throw new NotImplementedException();
+            return checked((int)Count(where));
         }
 
-
-
-        Task<int> IBaseRepository<TEntity, long>.CountAsync(Expression<Func<TEntity, bool>> where, CancellationToken cancellationToken)
+        async Task<int> IBaseRepository<TEntity, long>.CountAsync(Expression<Func<TEntity, bool>> where, CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            return checked((int)await CountAsync(where, cancellationToken));
         }
 
         IQueryable<TEntity> IBaseRepository<TEntity, long>.GetList()
         {
-            throw new NotImplementedException();
+            return GetList();
         }
 
         IQueryable<TEntity> IBaseRepository<TEntity, long>.GetList(Expression<Func<TEntity, bool>> where)
         {
-            throw new NotImplementedException();
+            return GetList(where);
         }
 
         Task<IQueryable<TEntity>> IBaseRepository<TEntity, long>.GetListAsync(CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            return GetListAsync(cancellationToken);
         }
 
         Task<IQueryable<TEntity>> IBaseRepository<TEntity, long>.GetListAsync(Expression<Func<TEntity, bool>> where, CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            return GetListAsync(where, cancellationToken);
         }
 
         TEntity IBaseRepository<TEntity, long>.GetModel(long id)
         {
-            throw new NotImplementedException();
+            return GetModel(id);
         }
 
         TEntity IBaseRepository<TEntity, long>.GetModel(Expression<Func<TEntity, bool>> where)
         {
-            throw new NotImplementedException();
+            return GetModel(where);
         }
 
         Task<TEntity> IBaseRepository<TEntity, long>.GetModelAsync(long id, CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            return GetModelAsync(id, cancellationToken);
         }
 
         Task<TEntity> IBaseRepository<TEntity, long>.GetModelAsync(Expression<Func<TEntity, bool>> where, CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            return GetModelAsync(where, cancellationToken);
         }
 
         IQueryable<TEntity> IBaseRepository<TEntity, long>.GetPaged(int pageIndex, int pageSize, Expression<Func<TEntity, object>> sortBy, bool isDesc)
         {
-            throw new NotImplementedException();
+            return GetPaged(pageIndex, pageSize, sortBy, isDesc);
         }
 
         IQueryable<TEntity> IBaseRepository<TEntity, long>.GetPaged(int pageIndex, int pageSize, Expression<Func<TEntity, object>> sortBy, Expression<Func<TEntity, bool>> where, bool isDesc)
         {
-            throw new NotImplementedException();
+            return GetPaged(pageIndex, pageSize, sortBy, where, isDesc);
         }
 
         Task<IQueryable<TEntity>> IBaseRepository<TEntity, long>.GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, object>> sortBy, bool isDesc, CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            return GetPagedAsync(pageIndex, pageSize, sortBy, isDesc, cancellationToken);
         }
 
         Task<IQueryable<TEntity>> IBaseRepository<TEntity, long>.GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, object>> sortBy, Expression<Func<TEntity, bool>> where, bool isDesc, CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            return GetPagedAsync(pageIndex, pageSize, sortBy, where, isDesc, cancellationToken);
         }
 
 

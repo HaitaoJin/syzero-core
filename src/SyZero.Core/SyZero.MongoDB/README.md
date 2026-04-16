@@ -1,143 +1,104 @@
 # SyZero.MongoDB
 
-SyZero 框架的 MongoDB 集成模块。
+SyZero 框架的 MongoDB 集成模块，提供 `IMongoContext` 和 `IRepository<TEntity>` 的 MongoDB 实现。
 
-## 📦 安装
+## 安装
 
 ```bash
 dotnet add package SyZero.MongoDB
 ```
 
-## ✨ 特性
-
-- 🚀 **仓储实现** - 基于 MongoDB 的仓储模式实现
-- 💾 **文档存储** - 原生文档数据库支持
-- 🔒 **查询构建** - 流畅的查询 API
-
----
-
-## 🚀 快速开始
-
-### 1. 配置 appsettings.json
+## 配置
 
 ```json
 {
   "MongoDB": {
-    "ConnectionString": "mongodb://localhost:27017",
-    "DatabaseName": "MyDatabase"
+    "DataBase": "syzero",
+    "UserName": "",
+    "Password": "",
+    "Services": [
+      {
+        "Host": "localhost",
+        "Port": 27017
+      }
+    ]
   }
 }
 ```
 
-### 2. 注册服务
+- `UserName` 和 `Password` 可留空，留空时按无认证连接处理。
+- `Services` 至少需要配置一个节点。
+
+## 注册
 
 ```csharp
-// Program.cs
+using SyZero;
+
 var builder = WebApplication.CreateBuilder(args);
-// 添加SyZero
+
 builder.AddSyZero();
 
-// 注册服务方式1 - 使用配置文件
 builder.Services.AddSyZeroMongoDB();
 
-// 注册服务方式2 - 使用委托配置
-builder.Services.AddSyZeroMongoDB(options =>
-{
-    options.ConnectionString = "mongodb://localhost:27017";
-    options.DatabaseName = "MyDatabase";
-});
-
-// 注册服务方式3 - 指定配置节
+// 或者从指定配置读取
 builder.Services.AddSyZeroMongoDB(builder.Configuration, "MongoDB");
 
-var app = builder.Build();
-// 使用SyZero
-app.UseSyZero();
-app.Run();
+// 或者在默认配置基础上追加覆盖
+builder.Services.AddSyZeroMongoDB(options =>
+{
+    options.DataBase = "syzero";
+    options.Services = new List<MongoServers>
+    {
+        new() { Host = "localhost", Port = 27017 }
+    };
+});
 ```
 
-### 3. 使用示例
+## 使用示例
 
 ```csharp
+using SyZero.Domain.Repository;
+
 public class UserService
 {
-    private readonly IRepository<User, string> _userRepository;
+    private readonly IRepository<User> _userRepository;
 
-    public UserService(IRepository<User, string> userRepository)
+    public UserService(IRepository<User> userRepository)
     {
         _userRepository = userRepository;
     }
 
-    public async Task<User> CreateUserAsync(User user)
+    public Task<User> CreateAsync(User user)
     {
-        return await _userRepository.InsertAsync(user);
+        return _userRepository.AddAsync(user);
     }
 
-    public async Task<List<User>> GetActiveUsersAsync()
+    public Task<IQueryable<User>> GetActiveUsersAsync()
     {
-        return await _userRepository.GetListAsync(u => u.IsActive);
+        return _userRepository.GetListAsync(x => x.Enabled);
     }
 }
 ```
 
----
+## 当前支持能力
 
-## 📖 配置选项
+- `Add` / `AddAsync`
+- `AddList` / `AddListAsync`
+- `GetModel` / `GetModelAsync`
+- `GetList` / `GetListAsync`
+- `GetPaged` / `GetPagedAsync`
+- `Update` / `UpdateAsync`
+- `Delete` / `DeleteAsync`
+- `Count` / `CountAsync`
 
-| 属性 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `ConnectionString` | `string` | `""` | MongoDB 连接字符串 |
-| `DatabaseName` | `string` | `""` | 数据库名称 |
+当前模块公开接口仍以 `IRepository<TEntity>` 为准，不提供 `IRepository<TEntity, TKey>`、聚合管道封装或索引管理 API。
 
----
+## 注意事项
 
-## 📖 API 说明
+1. 集合名默认使用实体类型名。
+2. 实体需要实现 `IEntity`，主键类型为 `long`。
+3. 注册成功不代表 MongoDB 连接立即建立，实际访问集合时才会触发网络连接。
 
-### IRepository<TEntity, TPrimaryKey> 接口
-
-| 方法 | 说明 |
-|------|------|
-| `GetAsync(id)` | 根据主键获取文档 |
-| `GetListAsync(filter)` | 根据条件获取文档列表 |
-| `InsertAsync(entity)` | 插入文档 |
-| `UpdateAsync(entity)` | 更新文档 |
-| `DeleteAsync(id)` | 删除文档 |
-
-> 所有方法都有对应的异步版本（带 `Async` 后缀）
-
----
-
-## 🔧 高级用法
-
-### 聚合查询
-
-```csharp
-var result = await _userRepository.AggregateAsync(pipeline =>
-    pipeline
-        .Match(u => u.IsActive)
-        .Group(u => u.Department, g => new { Count = g.Count() })
-);
-```
-
-### 索引管理
-
-```csharp
-await _userRepository.CreateIndexAsync(
-    Builders<User>.IndexKeys.Ascending(u => u.Email),
-    new CreateIndexOptions { Unique = true }
-);
-```
-
----
-
-## ⚠️ 注意事项
-
-1. **连接字符串** - 确保 MongoDB 服务可访问
-2. **主键类型** - MongoDB 默认使用 ObjectId 作为主键
-3. **索引** - 为常用查询字段创建索引以提高性能
-
----
-
-## 📄 许可证
+## 许可证
 
 MIT License - 详见 [LICENSE](../../../LICENSE)

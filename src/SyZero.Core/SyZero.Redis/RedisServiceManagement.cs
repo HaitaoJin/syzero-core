@@ -20,14 +20,14 @@ namespace SyZero.Redis
         private readonly RedisClient _redis;
         private readonly RedisServiceManagementOptions _options;
         private readonly ConcurrentDictionary<string, Action<List<ServiceInfo>>> _subscriptions = new ConcurrentDictionary<string, Action<List<ServiceInfo>>>();
-        private readonly Random _random = new Random();
+        private static readonly ThreadLocal<Random> RandomProvider = new ThreadLocal<Random>(() => new Random(Guid.NewGuid().GetHashCode()));
         private readonly HttpClient _httpClient;
         private readonly string _instanceId;
         private Timer _healthCheckTimer;
         private Timer _cleanupTimer;
         private Timer _leaderRenewTimer;
         private bool _isLeader = false;
-        private IDisposable _pubSubDisposable;
+        private readonly ConcurrentDictionary<string, IDisposable> _pubSubDisposables = new ConcurrentDictionary<string, IDisposable>();
 
         /// <summary>
         /// 当前实例是否为 Leader
@@ -59,11 +59,11 @@ namespace SyZero.Redis
             // 如果启用 Leader 选举，先尝试获取 Leader
             if (_options.EnableLeaderElection)
             {
-                TryAcquireLeadershipAsync().ConfigureAwait(false);
+                RunBackgroundTask(TryAcquireLeadershipAsync, "初始化 Leader 选举");
 
                 // 启动 Leader 续期定时器
                 _leaderRenewTimer = new Timer(
-                    _ => TryAcquireLeadershipAsync().ConfigureAwait(false),
+                    _ => RunBackgroundTask(TryAcquireLeadershipAsync, "Leader 续期"),
                     null,
                     TimeSpan.FromSeconds(_options.LeaderLockRenewIntervalSeconds),
                     TimeSpan.FromSeconds(_options.LeaderLockRenewIntervalSeconds));
@@ -78,7 +78,7 @@ namespace SyZero.Redis
             if (_options.EnableHealthCheck)
             {
                 _healthCheckTimer = new Timer(
-                    _ => PerformHealthCheckAsync().ConfigureAwait(false),
+                    _ => RunBackgroundTask(PerformHealthCheckAsync, "健康检查"),
                     null,
                     TimeSpan.FromSeconds(_options.HealthCheckIntervalSeconds),
                     TimeSpan.FromSeconds(_options.HealthCheckIntervalSeconds));
@@ -88,7 +88,7 @@ namespace SyZero.Redis
             if (_options.AutoCleanExpiredServices)
             {
                 _cleanupTimer = new Timer(
-                    _ => CleanExpiredServicesAsync().ConfigureAwait(false),
+                    _ => RunBackgroundTask(CleanExpiredServicesAsync, "清理过期服务"),
                     null,
                     TimeSpan.FromSeconds(_options.AutoCleanIntervalSeconds),
                     TimeSpan.FromSeconds(_options.AutoCleanIntervalSeconds));
@@ -211,15 +211,15 @@ namespace SyZero.Redis
             return SelectByWeight(services);
         }
 
-        private ServiceInfo SelectByWeight(List<ServiceInfo> services)
+        private static ServiceInfo SelectByWeight(List<ServiceInfo> services)
         {
             var totalWeight = services.Sum(s => s.Weight);
             if (totalWeight <= 0)
             {
-                return services[_random.Next(services.Count)];
+                return services[GetRandom().Next(services.Count)];
             }
 
-            var randomWeight = _random.NextDouble() * totalWeight;
+            var randomWeight = GetRandom().NextDouble() * totalWeight;
             var currentWeight = 0.0;
             foreach (var service in services)
             {
@@ -508,11 +508,18 @@ namespace SyZero.Redis
             if (_options.EnablePubSub)
             {
                 var channel = GetPubSubChannel(serviceName);
-                _pubSubDisposable = _redis.Subscribe(channel, (ch, msg) =>
+                if (_pubSubDisposables.TryRemove(serviceName, out var existing))
                 {
-                    // 收到变更通知后，重新获取服务列表并回调
-                    var services = GetService(serviceName).GetAwaiter().GetResult();
-                    callback?.Invoke(services);
+                    existing.Dispose();
+                }
+
+                _pubSubDisposables[serviceName] = _redis.Subscribe(channel, (ch, msg) =>
+                {
+                    RunBackgroundTask(async () =>
+                    {
+                        var services = await GetService(serviceName);
+                        callback?.Invoke(services);
+                    }, $"服务变更通知回调({serviceName})");
                 });
             }
 
@@ -527,6 +534,10 @@ namespace SyZero.Redis
             {
                 var channel = GetPubSubChannel(serviceName);
                 _redis.UnSubscribe(channel);
+                if (_pubSubDisposables.TryRemove(serviceName, out var disposable))
+                {
+                    disposable.Dispose();
+                }
             }
 
             return Task.CompletedTask;
@@ -537,30 +548,26 @@ namespace SyZero.Redis
         /// </summary>
         private void PublishServiceChange(string serviceName)
         {
-            if (!_options.EnablePubSub) return;
-
-            try
-            {
-                var channel = GetPubSubChannel(serviceName);
-                _redis.Publish(channel, DateTime.UtcNow.ToString("O"));
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"SyZero.Redis: 发布服务变更通知失败: {ex.Message}");
-            }
-
-            // 同时通知本地订阅者
-            if (_subscriptions.TryGetValue(serviceName, out var callback))
+            if (_options.EnablePubSub)
             {
                 try
                 {
-                    var services = GetService(serviceName).GetAwaiter().GetResult();
-                    callback?.Invoke(services);
+                    var channel = GetPubSubChannel(serviceName);
+                    _redis.Publish(channel, DateTime.UtcNow.ToString("O"));
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // 忽略回调错误
+                    Console.WriteLine($"SyZero.Redis: 发布服务变更通知失败: {ex.Message}");
                 }
+            }
+
+            if (_subscriptions.TryGetValue(serviceName, out var callback))
+            {
+                RunBackgroundTask(async () =>
+                {
+                    var services = await GetService(serviceName);
+                    callback?.Invoke(services);
+                }, $"本地服务通知({serviceName})");
             }
         }
 
@@ -582,6 +589,26 @@ namespace SyZero.Redis
         private string GetPubSubChannel(string serviceName)
         {
             return $"{_options.PubSubChannelPrefix}{serviceName}";
+        }
+
+        private void RunBackgroundTask(Func<Task> taskFactory, string operationName)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await taskFactory();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"SyZero.Redis: {operationName}失败: {ex.Message}");
+                }
+            });
+        }
+
+        private static Random GetRandom()
+        {
+            return RandomProvider.Value ?? new Random(Guid.NewGuid().GetHashCode());
         }
 
         /// <summary>
@@ -612,7 +639,11 @@ namespace SyZero.Redis
             _leaderRenewTimer?.Dispose();
             _healthCheckTimer?.Dispose();
             _cleanupTimer?.Dispose();
-            _pubSubDisposable?.Dispose();
+            foreach (var disposable in _pubSubDisposables.Values)
+            {
+                disposable.Dispose();
+            }
+            _pubSubDisposables.Clear();
             _httpClient?.Dispose();
         }
 

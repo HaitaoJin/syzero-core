@@ -4,6 +4,31 @@
         <name>SyZero.Swagger</name>
     </assembly>
     <members>
+        <member name="T:Microsoft.AspNetCore.Builder.SwaggerExportExtensions">
+            <summary>
+            Swagger 导出扩展方法。
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.Builder.SwaggerExportExtensions.UseSwagger(Microsoft.AspNetCore.Builder.WebApplication,System.Action{Swashbuckle.AspNetCore.Swagger.SwaggerOptions},System.String)">
+            <summary>
+            注册 Swagger 中间件；若当前进程以 Swagger 导出模式启动，则导出后直接退出。
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.Builder.SwaggerExportExtensions.TryExportSwaggerAsync(Microsoft.AspNetCore.Builder.WebApplication,System.String[],System.String)">
+            <summary>
+            检查命令行参数，若包含 Swagger 输出参数则导出文档并返回 true。
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.Builder.SwaggerExportExtensions.TryGetSwaggerOutputPath(System.String[],System.String@)">
+            <summary>
+            从命令行参数中解析 Swagger 输出路径。
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.Builder.SwaggerExportExtensions.ExportSwaggerAsync(Microsoft.AspNetCore.Builder.WebApplication,System.String,System.String)">
+            <summary>
+            导出 Swagger JSON 到指定路径。
+            </summary>
+        </member>
         <member name="T:Microsoft.Extensions.DependencyInjection.SwaggerExtensions">
             <summary>
             Swagger 服务扩展方法

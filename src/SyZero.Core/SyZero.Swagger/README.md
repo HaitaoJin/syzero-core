@@ -59,6 +59,7 @@ app.UseSyZero();
 // 使用 Swagger
 app.UseSwagger();
 app.UseSwaggerUI();
+
 app.Run();
 ```
 
@@ -112,6 +113,27 @@ public class UserController : ControllerBase
 ---
 
 ## 🔧 高级用法
+
+### 构建时自动导出 Swagger
+
+引用 `SyZero.Swagger` 后，包会自动导入 `buildTransitive` 里的 MSBuild 目标：
+
+- `Build` 后执行 Swagger JSON 导出
+
+默认输出路径：
+
+- `$(TargetDir)swagger.json`
+
+如需覆盖，可在项目文件中自定义这些属性：
+
+```xml
+<PropertyGroup>
+  <GenerateSwaggerJsonOnBuild>true</GenerateSwaggerJsonOnBuild>
+  <SwaggerOutputFile>$(TargetDir)swagger.json</SwaggerOutputFile>
+</PropertyGroup>
+```
+
+前端开发代理、前端构建和发布复制由 `SyZero.AspNetCore.SpaProxy` 提供。
 
 ### 启用 XML 文档
 

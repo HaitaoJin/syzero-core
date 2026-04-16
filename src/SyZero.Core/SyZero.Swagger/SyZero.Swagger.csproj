@@ -1,9 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.1</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <Description>SyZero-Swagger</Description>
     <IsPackable>true</IsPackable>
+    <OpenApiGenerateDocuments>false</OpenApiGenerateDocuments>
   </PropertyGroup>
 
   <ItemGroup>
@@ -11,6 +12,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\SyZero\SyZero.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="buildTransitive\SyZero.Swagger.props" Pack="true" PackagePath="buildTransitive\SyZero.Swagger.props" />
+    <None Include="buildTransitive\SyZero.Swagger.targets" Pack="true" PackagePath="buildTransitive\SyZero.Swagger.targets" />
   </ItemGroup>
 </Project>

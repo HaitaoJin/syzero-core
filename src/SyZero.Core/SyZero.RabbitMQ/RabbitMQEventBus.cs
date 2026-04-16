@@ -26,6 +26,7 @@ namespace SyZero.RabbitMQ
         private readonly ConcurrentDictionary<string, List<Type>> _subscriptions;
         private readonly ConcurrentDictionary<string, List<Type>> _dynamicSubscriptions;
         private readonly ConcurrentDictionary<string, Func<object>> _handlerFactories;
+        private readonly object _subscriptionLock = new object();
         private IModel _consumerChannel;
         private string _queueName;
         private bool _disposed = false;
@@ -84,18 +85,21 @@ namespace SyZero.RabbitMQ
             var eventName = GetEventKey<T>();
             var handlerType = typeof(TH);
 
-            if (_subscriptions.ContainsKey(eventName))
+            lock (_subscriptionLock)
             {
-                _subscriptions[eventName].Remove(handlerType);
-                _handlerFactories.TryRemove($"{eventName}_{handlerType.Name}", out _);
-
-                if (_subscriptions[eventName].Count == 0)
+                if (_subscriptions.TryGetValue(eventName, out var handlers))
                 {
-                    _subscriptions.TryRemove(eventName, out _);
-                    RemoveBinding(eventName);
-                }
+                    handlers.Remove(handlerType);
+                    _handlerFactories.TryRemove($"{eventName}_{handlerType.Name}", out _);
 
-                _logger.LogInformation($"事件处理器 {handlerType.Name} 取消订阅事件 {eventName}");
+                    if (handlers.Count == 0)
+                    {
+                        _subscriptions.TryRemove(eventName, out _);
+                        RemoveBinding(eventName);
+                    }
+
+                    _logger.LogInformation($"事件处理器 {handlerType.Name} 取消订阅事件 {eventName}");
+                }
             }
         }
 
@@ -107,17 +111,20 @@ namespace SyZero.RabbitMQ
         {
             var handlerType = typeof(TH);
 
-            if (_dynamicSubscriptions.ContainsKey(eventName))
+            lock (_subscriptionLock)
             {
-                _dynamicSubscriptions[eventName].Remove(handlerType);
-
-                if (_dynamicSubscriptions[eventName].Count == 0)
+                if (_dynamicSubscriptions.TryGetValue(eventName, out var handlers))
                 {
-                    _dynamicSubscriptions.TryRemove(eventName, out _);
-                    RemoveBinding(eventName);
-                }
+                    handlers.Remove(handlerType);
 
-                _logger.LogInformation($"动态事件处理器 {handlerType.Name} 取消订阅事件 {eventName}");
+                    if (handlers.Count == 0)
+                    {
+                        _dynamicSubscriptions.TryRemove(eventName, out _);
+                        RemoveBinding(eventName);
+                    }
+
+                    _logger.LogInformation($"动态事件处理器 {handlerType.Name} 取消订阅事件 {eventName}");
+                }
             }
         }
 
@@ -130,7 +137,7 @@ namespace SyZero.RabbitMQ
         /// </summary>
         public void Publish(EventBase @event)
         {
-            PublishAsync(@event).GetAwaiter().GetResult();
+            RunSync(() => PublishAsync(@event));
         }
 
         /// <summary>
@@ -150,7 +157,7 @@ namespace SyZero.RabbitMQ
         /// </summary>
         public void Publish(string eventName, object eventData)
         {
-            PublishAsync(eventName, eventData).GetAwaiter().GetResult();
+            RunSync(() => PublishAsync(eventName, eventData));
         }
 
         /// <summary>
@@ -206,7 +213,7 @@ namespace SyZero.RabbitMQ
         /// </summary>
         public void PublishBatch(IEnumerable<EventBase> events)
         {
-            PublishBatchAsync(events).GetAwaiter().GetResult();
+            RunSync(() => PublishBatchAsync(events));
         }
 
         /// <summary>
@@ -232,9 +239,12 @@ namespace SyZero.RabbitMQ
         /// </summary>
         public void Clear()
         {
-            _subscriptions.Clear();
-            _dynamicSubscriptions.Clear();
-            _handlerFactories.Clear();
+            lock (_subscriptionLock)
+            {
+                _subscriptions.Clear();
+                _dynamicSubscriptions.Clear();
+                _handlerFactories.Clear();
+            }
             _logger.LogInformation("已清空所有订阅");
         }
 
@@ -252,7 +262,10 @@ namespace SyZero.RabbitMQ
         /// </summary>
         public bool IsSubscribed(string eventName)
         {
-            return _subscriptions.ContainsKey(eventName) || _dynamicSubscriptions.ContainsKey(eventName);
+            lock (_subscriptionLock)
+            {
+                return _subscriptions.ContainsKey(eventName) || _dynamicSubscriptions.ContainsKey(eventName);
+            }
         }
 
         /// <summary>
@@ -260,76 +273,84 @@ namespace SyZero.RabbitMQ
         /// </summary>
         public IEnumerable<string> GetSubscribedEvents()
         {
-            var subscribedEvents = new HashSet<string>();
-            
-            foreach (var eventName in _subscriptions.Keys)
+            lock (_subscriptionLock)
             {
-                subscribedEvents.Add(eventName);
+                var subscribedEvents = new HashSet<string>();
+                foreach (var eventName in _subscriptions.Keys)
+                {
+                    subscribedEvents.Add(eventName);
+                }
+                foreach (var eventName in _dynamicSubscriptions.Keys)
+                {
+                    subscribedEvents.Add(eventName);
+                }
+                return subscribedEvents.ToArray();
             }
-            
-            foreach (var eventName in _dynamicSubscriptions.Keys)
-            {
-                subscribedEvents.Add(eventName);
-            }
-            
-            return subscribedEvents;
         }
 
         private void DoSubscribe(Type handlerType, string eventName, Func<object> handlerFactory)
         {
-            if (!_subscriptions.ContainsKey(eventName))
+            lock (_subscriptionLock)
             {
-                if (!_persistentConnection.IsConnected)
+                if (!_subscriptions.TryGetValue(eventName, out var handlers))
                 {
-                    _persistentConnection.TryConnect();
+                    if (!_persistentConnection.IsConnected)
+                    {
+                        _persistentConnection.TryConnect();
+                    }
+
+                    using var channel = _persistentConnection.CreateModel();
+                    channel.QueueBind(
+                        queue: _queueName,
+                        exchange: _options.ExchangeName,
+                        routingKey: eventName);
+
+                    handlers = new List<Type>();
+                    _subscriptions[eventName] = handlers;
                 }
 
-                using var channel = _persistentConnection.CreateModel();
-                channel.QueueBind(
-                    queue: _queueName,
-                    exchange: _options.ExchangeName,
-                    routingKey: eventName);
+                if (handlers.Contains(handlerType))
+                {
+                    _logger.LogWarning($"事件处理器 {handlerType.Name} 已订阅事件 {eventName}");
+                    return;
+                }
 
-                _subscriptions[eventName] = new List<Type>();
+                handlers.Add(handlerType);
+                _handlerFactories[$"{eventName}_{handlerType.Name}"] = handlerFactory;
             }
-
-            if (_subscriptions[eventName].Contains(handlerType))
-            {
-                _logger.LogWarning($"事件处理器 {handlerType.Name} 已订阅事件 {eventName}");
-                return;
-            }
-
-            _subscriptions[eventName].Add(handlerType);
-            _handlerFactories[$"{eventName}_{handlerType.Name}"] = handlerFactory;
 
             _logger.LogInformation($"事件处理器 {handlerType.Name} 订阅事件 {eventName}");
         }
 
         private void DoSubscribeDynamic(Type handlerType, string eventName)
         {
-            if (!_dynamicSubscriptions.ContainsKey(eventName))
+            lock (_subscriptionLock)
             {
-                if (!_persistentConnection.IsConnected)
+                if (!_dynamicSubscriptions.TryGetValue(eventName, out var handlers))
                 {
-                    _persistentConnection.TryConnect();
+                    if (!_persistentConnection.IsConnected)
+                    {
+                        _persistentConnection.TryConnect();
+                    }
+
+                    using var channel = _persistentConnection.CreateModel();
+                    channel.QueueBind(
+                        queue: _queueName,
+                        exchange: _options.ExchangeName,
+                        routingKey: eventName);
+
+                    handlers = new List<Type>();
+                    _dynamicSubscriptions[eventName] = handlers;
                 }
 
-                using var channel = _persistentConnection.CreateModel();
-                channel.QueueBind(
-                    queue: _queueName,
-                    exchange: _options.ExchangeName,
-                    routingKey: eventName);
+                if (handlers.Contains(handlerType))
+                {
+                    _logger.LogWarning($"动态事件处理器 {handlerType.Name} 已订阅事件 {eventName}");
+                    return;
+                }
 
-                _dynamicSubscriptions[eventName] = new List<Type>();
+                handlers.Add(handlerType);
             }
-
-            if (_dynamicSubscriptions[eventName].Contains(handlerType))
-            {
-                _logger.LogWarning($"动态事件处理器 {handlerType.Name} 已订阅事件 {eventName}");
-                return;
-            }
-
-            _dynamicSubscriptions[eventName].Add(handlerType);
 
             _logger.LogInformation($"动态事件处理器 {handlerType.Name} 订阅事件 {eventName}");
         }
@@ -455,9 +476,9 @@ namespace SyZero.RabbitMQ
             _logger.LogInformation($"处理事件: {eventName}");
 
             // 处理普通订阅
-            if (_subscriptions.ContainsKey(eventName))
+            var handlerTypes = GetTypedHandlers(eventName);
+            if (handlerTypes.Count > 0)
             {
-                var handlerTypes = _subscriptions[eventName];
                 foreach (var handlerType in handlerTypes)
                 {
                     var factoryKey = $"{eventName}_{handlerType.Name}";
@@ -470,24 +491,27 @@ namespace SyZero.RabbitMQ
                             continue;
                         }
 
-                        var eventType = _subscriptions[eventName].FirstOrDefault()?.BaseType?.GetGenericArguments()?.FirstOrDefault();
+                        var eventType = GetHandlerEventType(handlerType);
                         if (eventType != null)
                         {
                             var integrationEvent = JsonSerializer.Deserialize(message, eventType);
                             var concreteType = typeof(IEventHandler<>).MakeGenericType(eventType);
-                            await (Task)concreteType.GetMethod("HandleAsync").Invoke(handler, new object[] { integrationEvent });
+                            if (concreteType.GetMethod("HandleAsync")?.Invoke(handler, new[] { integrationEvent }) is Task taskResult)
+                            {
+                                await taskResult;
+                            }
                         }
                     }
                 }
             }
 
             // 处理动态订阅
-            if (_dynamicSubscriptions.ContainsKey(eventName))
+            var dynamicHandlerTypes = GetDynamicHandlers(eventName);
+            if (dynamicHandlerTypes.Count > 0)
             {
-                var handlerTypes = _dynamicSubscriptions[eventName];
                 using var scope = _serviceProvider.CreateScope();
                 
-                foreach (var handlerType in handlerTypes)
+                foreach (var handlerType in dynamicHandlerTypes)
                 {
                     var handler = scope.ServiceProvider.GetService(handlerType) as IDynamicEventHandler;
                     if (handler == null)
@@ -507,6 +531,33 @@ namespace SyZero.RabbitMQ
             return typeof(T).Name;
         }
 
+        private List<Type> GetTypedHandlers(string eventName)
+        {
+            lock (_subscriptionLock)
+            {
+                return _subscriptions.TryGetValue(eventName, out var handlers)
+                    ? handlers.ToList()
+                    : new List<Type>();
+            }
+        }
+
+        private List<Type> GetDynamicHandlers(string eventName)
+        {
+            lock (_subscriptionLock)
+            {
+                return _dynamicSubscriptions.TryGetValue(eventName, out var handlers)
+                    ? handlers.ToList()
+                    : new List<Type>();
+            }
+        }
+
+        private static Type GetHandlerEventType(Type handlerType)
+        {
+            return handlerType.GetInterfaces()
+                .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEventHandler<>))
+                ?.GetGenericArguments()[0];
+        }
+
         private Polly.IAsyncPolicy CreateRetryPolicy()
         {
             return Polly.Policy.Handle<Exception>()
@@ -517,6 +568,11 @@ namespace SyZero.RabbitMQ
                     {
                         _logger.LogWarning(ex, $"RabbitMQ 发布失败，重试 {retry}/{_options.RetryCount}，等待 {time.TotalMilliseconds}ms");
                     });
+        }
+
+        private static void RunSync(Func<Task> taskFactory)
+        {
+            taskFactory().ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
         #endregion

@@ -1,0 +1,57 @@
+<Project>
+  <PropertyGroup>
+    <_SyZeroFrontendBuildAfterTargets>Build</_SyZeroFrontendBuildAfterTargets>
+    <_SyZeroFrontendBuildAfterTargets Condition="'$(GenerateSwaggerJsonOnBuild)' == 'true'">SyZeroGenerateSwaggerJson</_SyZeroFrontendBuildAfterTargets>
+  </PropertyGroup>
+
+  <Target Name="SyZeroWriteSpaConfigurationToDisk" BeforeTargets="AssignTargetPaths"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(SpaProxyServerUrl)' != '' and '$(SpaProxyLaunchCommand)' != ''">
+    <PropertyGroup>
+      <_SpaProxyServerLaunchConfig>$(IntermediateOutputPath)spa.proxy.json</_SpaProxyServerLaunchConfig>
+      <_SpaRootFullPath>$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(SpaRoot)'))).Replace('\','\\'))</_SpaRootFullPath>
+    </PropertyGroup>
+    <ItemGroup>
+      <_SpaProxyServerLaunchConfigLines Include="{" />
+      <_SpaProxyServerLaunchConfigLines Include="  &quot;SpaProxyServer&quot;: {" />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;ServerUrl&quot;: &quot;$(SpaProxyServerUrl)&quot;," />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;RedirectUrl&quot;: &quot;$(SpaProxyRedirectUrl)&quot;," Condition="'$(SpaProxyRedirectUrl)' != ''" />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;RedirectUrl&quot;: &quot;$(SpaProxyServerUrl)&quot;," Condition="'$(SpaProxyRedirectUrl)' == ''" />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;LaunchCommand&quot;: &quot;$(SpaProxyLaunchCommand)&quot;," />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;WorkingDirectory&quot;: &quot;$(_SpaRootFullPath)&quot;," />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;MaxTimeoutInSeconds&quot;: &quot;$(SpaProxyTimeoutInSeconds)&quot;," />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;KeepRunning&quot;: &quot;$(SpaProxyKeepRunning)&quot;" />
+      <_SpaProxyServerLaunchConfigLines Include="  }" />
+      <_SpaProxyServerLaunchConfigLines Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_SpaProxyServerLaunchConfig)" Lines="@(_SpaProxyServerLaunchConfigLines)" WriteOnlyWhenDifferent="true" Overwrite="true" />
+    <ItemGroup>
+      <ContentWithTargetPath Include="$(_SpaProxyServerLaunchConfig)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" TargetPath="spa.proxy.json" />
+      <FileWrites Include="$(_SpaProxyServerLaunchConfig)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="SyZeroBuildFrontend" AfterTargets="$(_SyZeroFrontendBuildAfterTargets)"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(BuildFrontendOnBuild)' == 'true' and Exists('$(FrontendProjectPath)')">
+    <Message Importance="High" Condition="'$(SwaggerOutputFile)' != ''" Text="Building frontend with Swagger input: $(SwaggerOutputFile)" />
+    <Message Importance="High" Condition="'$(SwaggerOutputFile)' == ''" Text="Building frontend with Swagger input: $(TargetDir)swagger.json" />
+    <Exec Condition="'$(SwaggerOutputFile)' != ''"
+          Command="dotnet build &quot;$(FrontendProjectPath)&quot; -c $(Configuration)"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          EnvironmentVariables="SWAGGER_INPUT_FILE=$(SwaggerOutputFile);CONFIGURATION=$(Configuration)" />
+    <Exec Condition="'$(SwaggerOutputFile)' == ''"
+          Command="dotnet build &quot;$(FrontendProjectPath)&quot; -c $(Configuration)"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          EnvironmentVariables="SWAGGER_INPUT_FILE=$(TargetDir)swagger.json;CONFIGURATION=$(Configuration)" />
+  </Target>
+
+  <Target Name="SyZeroCopyFrontendToPublish" AfterTargets="Publish"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(BuildFrontendOnBuild)' == 'true' and Exists('$(FrontendDistDir)')">
+    <ItemGroup>
+      <_SyZeroFrontendDistFiles Include="$(FrontendDistDir)\**\*" />
+    </ItemGroup>
+    <MakeDir Directories="$(PublishDir)wwwroot" />
+    <Copy SourceFiles="@(_SyZeroFrontendDistFiles)"
+          DestinationFiles="@(_SyZeroFrontendDistFiles->'$(PublishDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>

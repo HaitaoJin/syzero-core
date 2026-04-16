@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
@@ -24,21 +24,24 @@ namespace SyZero.AspNetCore.Middleware
         }
         public async Task InvokeAsync(HttpContext context, RequestDelegate next)
         {
-            context.User = null;
-            if (context.Request.Headers.TryGetValue("Authorization", out var token) && token.ToString().StartsWith("Bearer "))
+            using (SyZeroUtil.BeginScope(context.RequestServices))
             {
-                var tokenString = token.ToString().Replace("Bearer ", string.Empty);
-
-                // 如果令牌有效，则将用户信息添加到上下文中
-                var claimsPrincipal = _token.GetPrincipal(tokenString);
-
-                if (claimsPrincipal != null)
+                context.User = null;
+                if (context.Request.Headers.TryGetValue("Authorization", out var token) && token.ToString().StartsWith("Bearer "))
                 {
-                    context.User = claimsPrincipal;
-                    SyZeroUtil.GetScopeService<ISySession>().Parse(claimsPrincipal);
+                    var tokenString = token.ToString().Replace("Bearer ", string.Empty);
+
+                    // 如果令牌有效，则将用户信息添加到上下文中
+                    var claimsPrincipal = _token.GetPrincipal(tokenString);
+
+                    if (claimsPrincipal != null)
+                    {
+                        context.User = claimsPrincipal;
+                        SyZeroUtil.GetScopeService<ISySession>().Parse(claimsPrincipal);
+                    }
                 }
+                await next.Invoke(context);
             }
-            await next.Invoke(context);
         }
     }
 }

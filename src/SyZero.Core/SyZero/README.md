@@ -1,6 +1,6 @@
 # SyZero
 
-SyZero 是一个轻量级的 .NET 微服务框架核心库，提供依赖注入、配置管理、领域驱动等基础功能。
+SyZero 是一个轻量级的 .NET 微服务框架核心库，提供依赖注入、基础领域模型、服务管理和轻量级事件总线等通用能力。
 
 ## 📦 安装
 
@@ -10,131 +10,152 @@ dotnet add package SyZero
 
 ## ✨ 特性
 
-- 🚀 **依赖注入** - 基于 Microsoft.Extensions.DependencyInjection 的模块化依赖注入
-- 💾 **仓储模式** - 通用仓储接口和工作单元模式
-- 🔒 **配置管理** - 统一的配置读取和管理
-- 🎯 **领域驱动** - 实体、值对象、领域事件等 DDD 基础设施
-- 📝 **异常处理** - 统一的业务异常和友好异常处理
+- 🚀 **依赖注入** - 基于 `Microsoft.Extensions.DependencyInjection` 的约定注册
+- 🧩 **应用基础设施** - `SyZeroServiceBase`、`ApplicationService`、会话与权限基础能力
+- 💾 **仓储与工作单元接口** - 统一抽象，方便接入 EF Core、SqlSugar、MongoDB
+- 🌐 **轻量级服务管理** - 内置 `LocalServiceManagement`、`DBServiceManagement`
+- 📣 **轻量级事件总线** - 内置 `LocalEventBus`、`DBEventBus`
+- 🔧 **配置与工具** - 统一配置读取、异常模型、常用扩展工具
 
 ---
 
 ## 🚀 快速开始
 
-### 1. 配置 appsettings.json
-
-```json
-{
-  "Server": {
-    "Name": "MyService",
-    "Port": 5000
-  }
-}
-```
-
-### 2. 注册服务
+### 1. 注册核心服务
 
 ```csharp
-// Program.cs
+using SyZero;
+
 var builder = WebApplication.CreateBuilder(args);
-// 添加SyZero
+
 builder.AddSyZero();
-
-// 注册服务方式1 - 使用配置文件
-builder.Services.AddSyZero();
-
-// 注册服务方式2 - 使用委托配置
-builder.Services.AddSyZero(options =>
-{
-    options.ServerName = "MyService";
-    options.ServerPort = 5000;
-});
+builder.Services.AddControllers();
 
 var app = builder.Build();
-// 使用SyZero
+
 app.UseSyZero();
+app.MapControllers();
+
 app.Run();
 ```
 
-### 3. 使用示例
+### 2. 使用约定注入
 
 ```csharp
-// 定义实体
-public class User : Entity<long>
+using SyZero.Dependency;
+
+public interface IUserService
 {
-    public string Name { get; set; }
-    public string Email { get; set; }
+    Task<string> GetNameAsync(long id);
 }
 
-// 使用仓储
-public class UserService
+public class UserService : IUserService, IScopedDependency
 {
-    private readonly IRepository<User, long> _userRepository;
-
-    public UserService(IRepository<User, long> userRepository)
+    public Task<string> GetNameAsync(long id)
     {
-        _userRepository = userRepository;
+        return Task.FromResult($"user-{id}");
     }
+}
+```
 
-    public async Task<User> GetUserAsync(long id)
+### 3. 继承应用服务基类
+
+```csharp
+using SyZero.Application.Service;
+
+public class UserAppService : ApplicationService
+{
+    public string GetCurrentUser()
     {
-        return await _userRepository.GetAsync(id);
+        return SySession.UserName ?? "anonymous";
     }
 }
 ```
 
 ---
 
-## 📖 配置选项
+## 📖 轻量级服务管理
 
-| 属性 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `ServerName` | `string` | `""` | 服务名称 |
-| `ServerPort` | `int` | `5000` | 服务端口 |
+SyZero 核心包内置两种无需额外中间件的服务管理实现：
 
----
+| 实现 | 场景 | 特点 |
+|------|------|------|
+| `LocalServiceManagement` | 单机 / 开发环境 | 基于本地文件，无外部依赖 |
+| `DBServiceManagement` | 简单多实例部署 | 基于数据库，支持健康检查和 Leader 选举 |
 
-## 📖 API 说明
-
-### IRepository<TEntity, TPrimaryKey> 接口
-
-| 方法 | 说明 |
-|------|------|
-| `GetAsync(id)` | 根据主键获取实体 |
-| `GetListAsync()` | 获取实体列表 |
-| `InsertAsync(entity)` | 插入实体 |
-| `UpdateAsync(entity)` | 更新实体 |
-| `DeleteAsync(id)` | 删除实体 |
-
-> 所有方法都有对应的异步版本（带 `Async` 后缀）
-
----
-
-## 🔧 高级用法
-
-### 自定义仓储
+示例：
 
 ```csharp
-public interface IUserRepository : IRepository<User, long>
+builder.Services.AddLocalServiceManagement(options =>
 {
-    Task<User> GetByEmailAsync(string email);
+    options.EnableHealthCheck = true;
+    options.EnableLeaderElection = false;
+});
+```
+
+---
+
+## 📖 轻量级事件总线
+
+SyZero 核心包内置两种事件总线实现：
+
+| 实现 | 场景 | 特点 |
+|------|------|------|
+| `LocalEventBus` | 进程内事件 | 基于内存，适合单体应用 |
+| `DBEventBus` | 需要持久化与重试 | 基于数据库，适合简单分布式场景 |
+
+示例：
+
+```csharp
+using SyZero.EventBus;
+
+builder.Services.AddLocalEventBus();
+
+public class OrderCreatedEvent : EventBase
+{
+    public long OrderId { get; set; }
 }
 
-public class UserRepository : BaseRepository<User, long>, IUserRepository
+public class OrderCreatedHandler : IEventHandler<OrderCreatedEvent>
 {
-    public async Task<User> GetByEmailAsync(string email)
+    public Task HandleAsync(OrderCreatedEvent @event)
     {
-        return await GetFirstOrDefaultAsync(u => u.Email == email);
+        Console.WriteLine($"order created: {@event.OrderId}");
+        return Task.CompletedTask;
+    }
+}
+```
+
+发布事件：
+
+```csharp
+public class OrderService
+{
+    private readonly IEventBus _eventBus;
+
+    public OrderService(IEventBus eventBus)
+    {
+        _eventBus = eventBus;
+        _eventBus.Subscribe<OrderCreatedEvent, OrderCreatedHandler>(() => new OrderCreatedHandler());
+    }
+
+    public Task CreateAsync(long orderId)
+    {
+        return _eventBus.PublishAsync(new OrderCreatedEvent
+        {
+            OrderId = orderId
+        });
     }
 }
 ```
 
 ---
 
-## ⚠️ 注意事项
+## ⚠️ 说明
 
-1. **配置文件** - 确保 appsettings.json 中包含必要的配置节点
-2. **依赖注入** - 所有服务都应通过依赖注入获取
-3. **异步方法** - 推荐使用异步方法以提高性能
+1. `builder.AddSyZero()` 会注册核心依赖，并在 `app.UseSyZero()` 时初始化全局运行时。
+2. `ISySession` 是请求作用域对象，应只在请求链路内访问。
+3. 轻量级事件总线和服务管理适合简单场景；需要更强可靠性时，建议使用 `SyZero.RabbitMQ`、`SyZero.Redis`、`SyZero.Consul`、`SyZero.Nacos` 等模块。
 
 ---
 

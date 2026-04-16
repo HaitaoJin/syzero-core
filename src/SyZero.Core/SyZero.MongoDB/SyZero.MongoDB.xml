@@ -4,5 +4,25 @@
         <name>SyZero.MongoDB</name>
     </assembly>
     <members>
+        <member name="T:SyZero.SyZeroMongoDBExtension">
+            <summary>
+            MongoDB 扩展方法
+            </summary>
+        </member>
+        <member name="M:SyZero.SyZeroMongoDBExtension.AddSyZeroMongoDB(Microsoft.Extensions.DependencyInjection.IServiceCollection)">
+            <summary>
+            使用 AppConfig 中的 MongoDB 配置注册服务
+            </summary>
+        </member>
+        <member name="M:SyZero.SyZeroMongoDBExtension.AddSyZeroMongoDB(Microsoft.Extensions.DependencyInjection.IServiceCollection,Microsoft.Extensions.Configuration.IConfiguration,System.String)">
+            <summary>
+            使用指定配置注册服务
+            </summary>
+        </member>
+        <member name="M:SyZero.SyZeroMongoDBExtension.AddSyZeroMongoDB(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{SyZero.MongoDB.MongoOptions})">
+            <summary>
+            使用默认配置并允许额外覆盖注册服务
+            </summary>
+        </member>
     </members>
 </doc>

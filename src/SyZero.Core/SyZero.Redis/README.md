@@ -1,6 +1,6 @@
 # SyZero.Redis
 
-SyZero 框架的 Redis 缓存和分布式锁模块。
+SyZero.Redis 提供 Redis 缓存、分布式锁、Redis 服务管理和 Redis 事件总线能力。
 
 ## 📦 安装
 
@@ -10,10 +10,11 @@ dotnet add package SyZero.Redis
 
 ## ✨ 特性
 
-- 🚀 **缓存** - 基于 Redis 的分布式缓存
-- 🔒 **分布式锁** - 可靠的分布式锁实现
-- 💾 **多模式** - 支持主从、哨兵、集群模式
-- 🔍 **服务发现** - 可作为服务注册中心
+- 🚀 **分布式缓存** - `ICache` 基于 Redis 实现
+- 🔒 **分布式锁** - `ILockUtil` 基于 Redis 实现
+- 🔍 **服务发现** - `RedisServiceManagement` 支持注册、发现、健康检查、Pub/Sub 通知
+- 📣 **事件总线** - `RedisEventBus` 基于 Redis Pub/Sub 实现跨实例广播
+- 💾 **多模式连接** - 支持主从、哨兵、集群模式
 
 ---
 
@@ -27,6 +28,14 @@ dotnet add package SyZero.Redis
     "Type": "MasterSlave",
     "Master": "localhost:6379,password=123456,defaultDatabase=0",
     "Slave": []
+  },
+  "RedisServiceManagement": {
+    "EnableHealthCheck": true,
+    "EnableLeaderElection": true,
+    "EnablePubSub": true
+  },
+  "RedisEventBus": {
+    "ChannelPrefix": "SyZero:EventBus:"
   }
 }
 ```
@@ -34,32 +43,27 @@ dotnet add package SyZero.Redis
 ### 2. 注册服务
 
 ```csharp
-// Program.cs
-var builder = WebApplication.CreateBuilder(args);
-// 添加SyZero
-builder.AddSyZero();
+using SyZero;
 
-// 注册服务方式1 - 使用配置文件
+var builder = WebApplication.CreateBuilder(args);
+
+builder.AddSyZero();
 builder.Services.AddSyZeroRedis();
 
-// 注册服务方式2 - 使用委托配置
-builder.Services.AddSyZeroRedis(options =>
-{
-    options.Type = RedisType.MasterSlave;
-    options.Master = "localhost:6379";
-});
+// 可选：Redis 服务管理
+builder.Services.AddRedisServiceManagement();
 
-// 注册服务方式3 - 添加服务发现
-builder.Services.AddSyZeroRedis()
-    .AddRedisServiceManagement();
+// 可选：Redis 事件总线
+builder.Services.AddRedisEventBus();
 
 var app = builder.Build();
-// 使用SyZero
 app.UseSyZero();
 app.Run();
 ```
 
-### 3. 使用示例
+---
+
+## 📖 缓存与锁
 
 ```csharp
 public class UserService
@@ -77,23 +81,21 @@ public class UserService
     {
         var cacheKey = $"user:{id}";
         var user = await _cache.GetAsync<User>(cacheKey);
-        
+
         if (user == null)
         {
-            user = await LoadUserFromDbAsync(id);
-            await _cache.SetAsync(cacheKey, user, TimeSpan.FromMinutes(30));
+            user = await LoadFromDbAsync(id);
+            await _cache.SetAsync(cacheKey, user, 1800);
         }
-        
+
         return user;
     }
 
-    public async Task CreateOrderAsync(Order order)
+    public async Task CreateOrderAsync(string orderNo)
     {
-        var lockKey = $"order:create:{order.UserId}";
-        
-        using (await _lockUtil.LockAsync(lockKey, TimeSpan.FromSeconds(30)))
+        using (await _lockUtil.LockAsync($"order:{orderNo}", TimeSpan.FromSeconds(30)))
         {
-            // 在锁内执行订单创建逻辑
+            // 在锁内执行业务逻辑
         }
     }
 }
@@ -101,71 +103,125 @@ public class UserService
 
 ---
 
-## 📖 配置选项
+## 📖 Redis 服务管理
 
-| 属性 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `Type` | `string` | `"MasterSlave"` | Redis 模式（MasterSlave/Sentinel/Cluster） |
-| `Master` | `string` | `""` | 主节点连接字符串 |
-| `Slave` | `string[]` | `[]` | 从节点连接字符串列表 |
-| `Sentinel` | `string[]` | `[]` | 哨兵节点列表 |
+`RedisServiceManagement` 适合简单分布式部署，支持：
+
+- 服务注册 / 注销
+- 心跳与健康检查
+- Leader 选举
+- Redis Pub/Sub 实时通知
+
+```csharp
+builder.Services.AddSyZeroRedis();
+builder.Services.AddRedisServiceManagement(options =>
+{
+    options.EnableHealthCheck = true;
+    options.EnableLeaderElection = true;
+    options.EnablePubSub = true;
+});
+```
 
 ---
 
-## 📖 API 说明
+## 📖 Redis 事件总线
 
-### ICache 接口
+`RedisEventBus` 基于 Redis Pub/Sub，适合需要跨实例广播、但不要求持久化和可靠重试的场景。
 
-| 方法 | 说明 |
-|------|------|
-| `GetAsync<T>(key)` | 获取缓存值 |
-| `SetAsync<T>(key, value, expiration)` | 设置缓存值 |
-| `RemoveAsync(key)` | 移除缓存 |
-| `ExistsAsync(key)` | 检查缓存是否存在 |
+如果你需要持久化、重试或死信队列，请改用 `DBEventBus` 或 `RabbitMQEventBus`。
 
-### ILockUtil 接口
+### 注册
 
-| 方法 | 说明 |
-|------|------|
-| `LockAsync(key, expiration)` | 获取分布式锁 |
+```csharp
+builder.Services.AddSyZeroRedis();
+builder.Services.AddRedisEventBus(options =>
+{
+    options.ChannelPrefix = "SyZero:EventBus:";
+});
+```
 
-> 所有方法都有对应的异步版本（带 `Async` 后缀）
+### 定义事件与处理器
+
+```csharp
+using SyZero.EventBus;
+
+public class OrderCreatedEvent : EventBase
+{
+    public long OrderId { get; set; }
+}
+
+public class OrderCreatedHandler : IEventHandler<OrderCreatedEvent>
+{
+    public Task HandleAsync(OrderCreatedEvent @event)
+    {
+        Console.WriteLine($"order created: {@event.OrderId}");
+        return Task.CompletedTask;
+    }
+}
+```
+
+### 订阅与发布
+
+```csharp
+public class OrderPublisher
+{
+    private readonly IEventBus _eventBus;
+
+    public OrderPublisher(IEventBus eventBus)
+    {
+        _eventBus = eventBus;
+        _eventBus.Subscribe<OrderCreatedEvent, OrderCreatedHandler>(() => new OrderCreatedHandler());
+    }
+
+    public Task PublishAsync(long orderId)
+    {
+        return _eventBus.PublishAsync(new OrderCreatedEvent
+        {
+            OrderId = orderId
+        });
+    }
+}
+```
 
 ---
 
-## 🔧 高级用法
+## 📖 配置项
 
-### 哨兵模式
+### Redis
 
-```json
-{
-  "Redis": {
-    "Type": "Sentinel",
-    "Master": "mymaster",
-    "Sentinel": ["localhost:26379", "localhost:26380"]
-  }
-}
-```
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `Type` | `MasterSlave / Sentinel / Cluster` | Redis 模式 |
+| `Master` | `string` | 主节点连接串或主服务名 |
+| `Slave` | `string[]` | 从节点列表 |
+| `Sentinel` | `string[]` | 哨兵节点列表 |
 
-### 集群模式
+### RedisServiceManagement
 
-```json
-{
-  "Redis": {
-    "Type": "Cluster",
-    "Master": "localhost:7000",
-    "Slave": ["localhost:7001", "localhost:7002"]
-  }
-}
-```
+| 属性 | 默认值 | 说明 |
+|------|--------|------|
+| `KeyPrefix` | `syzero:services:` | 服务注册 Key 前缀 |
+| `LeaderKeyPrefix` | `syzero:leader:` | Leader 锁前缀 |
+| `ServiceNamesKey` | `syzero:service:names` | 服务名集合 Key |
+| `EnableHealthCheck` | `true` | 是否启用健康检查 |
+| `ServiceExpireSeconds` | `30` | 多久未心跳标记不健康 |
+| `AutoCleanExpiredServices` | `true` | 是否自动清理过期实例 |
+| `EnableLeaderElection` | `true` | 是否启用 Leader 选举 |
+| `EnablePubSub` | `true` | 是否启用服务变更通知 |
+
+### RedisEventBus
+
+| 属性 | 默认值 | 说明 |
+|------|--------|------|
+| `ChannelPrefix` | `SyZero:EventBus:` | 事件总线频道前缀 |
 
 ---
 
 ## ⚠️ 注意事项
 
-1. **连接字符串** - 确保 Redis 服务可访问
-2. **锁超时** - 合理设置锁的超时时间
-3. **序列化** - 缓存对象需要可序列化
+1. `RedisEventBus` 使用 Pub/Sub，不提供事件持久化、重试和死信队列。
+2. 订阅关系保存在当前进程内，应用重启后需要重新执行订阅。
+3. 建议将订阅逻辑放在应用启动阶段或长期存活服务中，而不是高频短生命周期对象里重复订阅。
 
 ---
 

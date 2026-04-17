@@ -44,6 +44,7 @@ jobs:
           name: build
           path: |
             ./nuget/*.nupkg
+            ./nuget/*.snupkg
 
       - name: Get Release Note
         id: get_releasenote
@@ -61,7 +62,9 @@ jobs:
         uses: ncipollo/release-action@v1
         if: github.ref_name == 'master' || github.ref_name == 'dev'
         with:
-          artifacts: "./nuget/*.nupkg"
+          artifacts: |
+            ./nuget/*.nupkg
+            ./nuget/*.snupkg
           body: ${{ steps.get_releasenote.outputs.body }}
           token: ${{ env.GB_NUGET_TOKEN }}
           prerelease: ${{ github.ref_name != 'master' }}
@@ -80,6 +83,9 @@ jobs:
         if: github.ref_name == 'master' || github.ref_name == 'dev'
         run: |
           dotnet nuget push *.nupkg --api-key "${{ env.GB_NUGET_TOKEN }}" --source "https://nuget.pkg.github.com/HaitaoJin/index.json" --skip-duplicate
+          if (Test-Path "*.snupkg") {
+            dotnet nuget push *.snupkg --api-key "${{ env.GB_NUGET_TOKEN }}" --source "https://nuget.pkg.github.com/HaitaoJin/index.json" --skip-duplicate
+          }
           Write-Host "done publishing packages"
         shell: powershell
 
@@ -96,5 +102,8 @@ jobs:
         if: github.ref_name == 'master' || github.ref_name == 'dev'
         run: |
           dotnet nuget push *.nupkg --api-key "${{ env.MS_NUGET_TOKEN }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
+          if (Test-Path "*.snupkg") {
+            dotnet nuget push *.snupkg --api-key "${{ env.MS_NUGET_TOKEN }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
+          }
           Write-Host "done publishing packages"
         shell: powershell

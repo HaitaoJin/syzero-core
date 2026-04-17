@@ -23,12 +23,11 @@ const moduleLinks = [
 ];
 
 export default defineConfig({
-  base: "/syzero/",
   title: "SyZero",
   description: "轻量级、模块化 .NET 微服务开发框架文档",
   head: [
-    ["link", { rel: "icon", href: "/syzero/icon/logo.png" }],
-    ["link", { rel: "apple-touch-icon", href: "/syzero/icon/logo.png" }],
+    ["link", { rel: "icon", href: "/icon/logo.png" }],
+    ["link", { rel: "apple-touch-icon", href: "/icon/logo.png" }],
   ],
   cleanUrls: true,
   ignoreDeadLinks: true,

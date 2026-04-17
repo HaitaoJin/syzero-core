@@ -38,6 +38,22 @@ jobs:
       - name: Create the package
         run: dotnet pack --configuration Release ./SyZero.slnx --no-restore --output ./nuget
 
+      - name: Verify packages
+        run: |
+          shopt -s nullglob
+          nupkgs=(./nuget/*.nupkg)
+          snupkgs=(./nuget/*.snupkg)
+          echo "nupkg count: ${#nupkgs[@]}"
+          echo "snupkg count: ${#snupkgs[@]}"
+          if [ ${#nupkgs[@]} -eq 0 ]; then
+            echo "No .nupkg files were generated in ./nuget"
+            exit 1
+          fi
+          if [ ${#snupkgs[@]} -eq 0 ]; then
+            echo "No .snupkg files were generated in ./nuget"
+            exit 1
+          fi
+
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:

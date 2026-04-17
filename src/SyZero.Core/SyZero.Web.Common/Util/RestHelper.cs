@@ -1,10 +1,9 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using RestSharp;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using System.Xml.Linq;
 using SyZero.Util;
 
 namespace SyZero.Web.Common
@@ -25,12 +24,8 @@ namespace SyZero.Web.Common
             {
                 return null;
             }
-            //返回的内容为Html则返回不对象化
-            if (response.Content.Contains("<html xmlns="))
-            {
-                return null;
-            }
-            return JObject.Parse(response.Content);
+
+            return ParseObjectResponse(response);
         }
 
         /// <summary>
@@ -47,12 +42,8 @@ namespace SyZero.Web.Common
             {
                 return null;
             }
-            //返回的内容为Html则返回不对象化
-            if (response.Content.Contains("<html xmlns="))
-            {
-                return null;
-            }
-            return JObject.Parse(response.Content);
+
+            return ParseObjectResponse(response);
         }
 
         /// <summary>
@@ -71,7 +62,7 @@ namespace SyZero.Web.Common
                 return null;
             }
 
-            return JsonConvert.DeserializeObject<T>(response.Content);
+            return DeserializeResponse<T>(response.Content);
         }
 
         /// <summary>
@@ -90,7 +81,7 @@ namespace SyZero.Web.Common
                 return null;
             }
 
-            return JsonConvert.DeserializeObject<T>(response.Content);
+            return DeserializeResponse<T>(response.Content);
         }
 
         public static string ExecuteToString(RestRequest request)
@@ -102,7 +93,7 @@ namespace SyZero.Web.Common
                 return string.Empty;
             }
 
-            return response.Content;
+            return response.Content ?? string.Empty;
         }
 
         /// <summary>
@@ -111,16 +102,16 @@ namespace SyZero.Web.Common
         /// <param name="baseUrl"></param>
         /// <param name="resource"></param>
         /// <param name="postData"></param>
-        public static string PostJson(string url,object body)
+        public static string PostJson(string url, object body)
         {
             var client = SyZeroUtil.GetService<RestClient>();
             var request = new RestRequest(url, Method.Post);
             request.RequestFormat = DataFormat.Json;
             request.AddHeader("Content-Type", "application/json");
-            request.AddBody(body); // uses JsonSerializer
+            AddRequestBody(request, body);
 
             var response = client.Execute(request);
-            return response.Content;
+            return response.Content ?? string.Empty;
         }
 
         /// <summary>
@@ -134,26 +125,34 @@ namespace SyZero.Web.Common
             request.RequestFormat = DataFormat.Json;
             request.AddHeader("Content-Type", "application/json");
             request.AddHeader("Authorization", token);
-            request.AddBody(body);
+            AddRequestBody(request, body);
 
             RestResponse response = client.Execute(request);
-            var result = new HttpResultMessage<T>();
-            result.IsSucceed = response.IsSuccessful;
+            var result = new HttpResultMessage<T>
+            {
+                IsSucceed = response.IsSuccessful,
+                StatusCode = (int)response.StatusCode
+            };
             if (result.IsSucceed)
             {
                 var content = response.Content;
-                if (!string.IsNullOrEmpty(content))
+                if (!string.IsNullOrWhiteSpace(content))
                 {
                     if (typeof(T) == typeof(string))
                     {
-                        result.Entity = (T)Convert.ChangeType(content, typeof(T)); ;
+                        result.Entity = (T)Convert.ChangeType(content, typeof(T));
                     }
                     else
                     {
-                        result.Entity = JsonConvert.DeserializeObject<T>(content.ToString());
+                        result.Entity = JsonConvert.DeserializeObject<T>(content);
                     }
                 }
             }
+            else
+            {
+                result.Message = response.ErrorMessage ?? response.Content;
+            }
+
             return result;
         }
 
@@ -163,15 +162,13 @@ namespace SyZero.Web.Common
             var request = new RestRequest(url, Method.Post);
             request.RequestFormat = DataFormat.Json;
             request.AddHeader("Content-Type", "application/json");
-            request.AddBody(body); // uses JsonSerializer
+            AddRequestBody(request, body);
 
             RestResponse response = client.Execute(request);
-            //var content = response.Content; // raw content as string
-            //if (!string.IsNullOrWhiteSpace(content))
-            //{
-            //    content = content.Replace("]\"", "]").Replace("\"[", "[");
-            //    content = content.Replace("}\"", "}").Replace("\"{", "{").Replace("\\\"", "\"");
-            //}
+            if (string.IsNullOrWhiteSpace(response.Content))
+            {
+                return HttpResultMessage.Create(response.IsSuccessful, response.Content ?? string.Empty, response.ErrorMessage ?? string.Empty);
+            }
 
             return JsonConvert.DeserializeObject<HttpResultMessage>(response.Content);
         }
@@ -186,53 +183,24 @@ namespace SyZero.Web.Common
                 request.RequestFormat = DataFormat.Json;
                 request.AddHeader("Content-Type", "application/json");
                 if (!string.IsNullOrEmpty(token) && token.Length > 1) { request.AddHeader("Authorization", "Bearer " + token); }
-                // request.AddHeader("Authorization", token);
                 if (method != Method.Get)
                 {
-                    request.AddBody(body); // uses JsonSerializer
+                    AddRequestBody(request, body);
                 }
-
 
                 RestResponse response = client.Execute(request);
                 var resultStr = response.Content;
-                var result = default(T);
-                //if (remoteInvokeResult.GetType().IsValueType)
-                //{
-                //    result = (T)Convert.ChangeType(remoteInvokeResult, typeof(T));
-                //}
-                //else 
                 if (typeof(T) == typeof(string))
                 {
-                    result = (T)Convert.ChangeType(resultStr, typeof(T));
+                    return (T)Convert.ChangeType(resultStr, typeof(T));
                 }
-                else
-                {
-                    result = JsonConvert.DeserializeObject<T>(resultStr);
-                }
-                return result;
 
-                //HttpWebRequest request = WebRequest.Create(reqUrl) as HttpWebRequest;
-                //request.Method = method.ToUpperInvariant();
-
-                //if (!string.IsNullOrEmpty(token) && token.Length > 1) { request.Headers.Add("Authorization", "Bearer " + token); }
-                //if (request.Method.Tostring() != "GET" && !string.IsNullOrEmpty(paramData) && paramData.Length > 0)
-                //{
-                //    request.ContentType = "application/json";
-                //    byte[] buffer = Encoding.UTF8.GetBytes(paramData);
-                //    request.ContentLength = buffer.Length;
-                //    request.GetRequestStream().Write(buffer, 0, buffer.Length);
-                //}
-
-                //using (HttpWebResponse resp = request.GetResponse() as HttpWebResponse)
-                //{
-                //    using (StreamReader stream = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
-                //    {
-                //        string result = stream.ReadToEnd();
-                //        return result;
-                //    }
-                //}
+                return string.IsNullOrWhiteSpace(resultStr) ? default : JsonConvert.DeserializeObject<T>(resultStr);
             }
-            catch (Exception ex) { return default(T); }
+            catch
+            {
+                return default;
+            }
         }
 
 
@@ -245,31 +213,21 @@ namespace SyZero.Web.Common
                 request.RequestFormat = DataFormat.Json;
                 request.AddHeader("Content-Type", "application/json");
                 if (!string.IsNullOrEmpty(token) && token.Length > 1) { request.AddHeader("Authorization", "Bearer " + token); }
-                // request.AddHeader("Authorization", token);
-                request.AddBody(body); // uses JsonSerializer
-
-
+                AddRequestBody(request, body);
 
                 RestResponse response = client.Execute(request);
                 var resultStr = response.Content;
-                var result = default(T);
-                //if (remoteInvokeResult.GetType().IsValueType)
-                //{
-                //    result = (T)Convert.ChangeType(remoteInvokeResult, typeof(T));
-                //}
-                //else 
                 if (typeof(T) == typeof(string))
                 {
-                    result = (T)Convert.ChangeType(resultStr, typeof(T));
+                    return (T)Convert.ChangeType(resultStr, typeof(T));
                 }
-                else
-                {
-                    result = JsonConvert.DeserializeObject<T>(resultStr);
-                }
-                return result;
 
+                return string.IsNullOrWhiteSpace(resultStr) ? default : JsonConvert.DeserializeObject<T>(resultStr);
             }
-            catch (Exception ex) { return default(T); }
+            catch
+            {
+                return default;
+            }
         }
 
         public static async Task<T> WechatGet<T>(string url, string token = "")
@@ -281,30 +239,20 @@ namespace SyZero.Web.Common
                 request.RequestFormat = DataFormat.Json;
                 request.AddHeader("Content-Type", "application/json");
                 if (!string.IsNullOrEmpty(token) && token.Length > 1) { request.AddHeader("Authorization", token); }
-                // request.AddHeader("Authorization", token);
-
-
 
                 RestResponse response = await client.ExecuteAsync(request);
                 var resultStr = response.Content;
-                var result = default(T);
-                //if (remoteInvokeResult.GetType().IsValueType)
-                //{
-                //    result = (T)Convert.ChangeType(remoteInvokeResult, typeof(T));
-                //}
-                //else 
                 if (typeof(T) == typeof(string))
                 {
-                    result = (T)Convert.ChangeType(resultStr, typeof(T));
+                    return (T)Convert.ChangeType(resultStr, typeof(T));
                 }
-                else
-                {
-                    result = JsonConvert.DeserializeObject<T>(resultStr);
-                }
-                return result;
 
+                return string.IsNullOrWhiteSpace(resultStr) ? default : JsonConvert.DeserializeObject<T>(resultStr);
             }
-            catch (Exception ex) { return default(T); }
+            catch
+            {
+                return default;
+            }
         }
         public async static Task<string> RestPost(string url, Dictionary<string, string> header = null, Dictionary<string, string> parameter = null, string body = "")
         {
@@ -320,10 +268,8 @@ namespace SyZero.Web.Common
             string str;
             try
             {
-                var uri = new Uri(url);
                 RestRequest request = new RestRequest(new Uri(url), method)
                 {
-                    //request.Timeout = 2000;
                     RequestFormat = DataFormat.Json
                 };
                 if (header != null)
@@ -342,7 +288,7 @@ namespace SyZero.Web.Common
                 }
                 if (!string.IsNullOrEmpty(body))
                 {
-                    request.AddJsonBody(body);
+                    AddRequestBody(request, body);
                 }
                 var response = await client.ExecuteAsync(request);
                 str = response.Content;
@@ -351,16 +297,77 @@ namespace SyZero.Web.Common
                     str = response.ErrorMessage;
                 }
             }
-            catch (Exception ex)
+            catch
             {
-                throw ex;
-            }
-            finally
-            {
-
+                throw;
             }
             return str;
         }
 
+        private static JObject ParseObjectResponse(RestResponse response)
+        {
+            if (response == null || string.IsNullOrWhiteSpace(response.Content) || IsHtmlResponse(response))
+            {
+                return null;
+            }
+
+            try
+            {
+                return JObject.Parse(response.Content);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        private static T DeserializeResponse<T>(string content) where T : class, new()
+        {
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                return null;
+            }
+
+            try
+            {
+                return JsonConvert.DeserializeObject<T>(content);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        private static bool IsHtmlResponse(RestResponse response)
+        {
+            if (!string.IsNullOrWhiteSpace(response.ContentType) &&
+                response.ContentType.IndexOf("html", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            return !string.IsNullOrWhiteSpace(response.Content) &&
+                   response.Content.TrimStart().StartsWith("<html", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void AddRequestBody(RestRequest request, object body)
+        {
+            if (body == null)
+            {
+                return;
+            }
+
+            if (body is string bodyText)
+            {
+                if (!string.IsNullOrWhiteSpace(bodyText))
+                {
+                    request.AddStringBody(bodyText, DataFormat.Json);
+                }
+
+                return;
+            }
+
+            request.AddJsonBody(body);
+        }
     }
 }

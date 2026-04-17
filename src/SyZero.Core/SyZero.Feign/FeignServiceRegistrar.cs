@@ -3,6 +3,7 @@ using System;
 using System.Linq;
 using SyZero.Application.Service;
 using SyZero.Client;
+using SyZero.Runtime.Security;
 using SyZero.Feign.Proxy;
 using SyZero.Serialization;
 using SyZero.Service;
@@ -59,20 +60,41 @@ namespace SyZero.Feign
                 var jsonSerialize = sp.GetRequiredService<IJsonSerialize>();
                 var serviceManagement = sp.GetRequiredService<IServiceManagement>();
 
-                var feignService = feignOptions.Service.FirstOrDefault(p => p.DllName == targetType.Assembly.GetName().Name);
+                var feignService = feignOptions.Service.FirstOrDefault(
+                    p => string.Equals(p.DllName, targetType.Assembly.GetName().Name, StringComparison.OrdinalIgnoreCase));
                 if (feignService == null)
                 {
                     throw new Exception($"DLL:{targetType.Assembly.GetName().Name} 未在 Feign 配置中注册!");
                 }
 
-                // 合并全局配置
-                MergeGlobalSettings(feignService, feignOptions.Global);
+                var effectiveService = CreateEffectiveService(feignService, feignOptions.Global);
 
-                var endPoint = GetServiceEndpoint(serviceManagement, feignService);
+                var endPoint = GetServiceEndpoint(serviceManagement, effectiveService);
                 
                 // 使用工厂管理器创建代理
-                return _factoryManager.CreateProxy(targetType, endPoint, feignService, jsonSerialize);
+                return _factoryManager.CreateProxy(targetType, endPoint, effectiveService, jsonSerialize);
             });
+        }
+
+        /// <summary>
+        /// 合并全局配置（服务配置优先）
+        /// </summary>
+        private static FeignService CreateEffectiveService(FeignService service, ServiceSetting global)
+        {
+            var effectiveService = new FeignService
+            {
+                ServiceName = service.ServiceName,
+                DllName = service.DllName,
+                Protocol = service.Protocol,
+                Strategy = service.Strategy,
+                Retry = service.Retry,
+                Timeout = service.Timeout,
+                EnableSsl = service.EnableSsl,
+                MaxMessageSize = service.MaxMessageSize
+            };
+
+            MergeGlobalSettings(effectiveService, global);
+            return effectiveService;
         }
 
         /// <summary>
@@ -81,6 +103,11 @@ namespace SyZero.Feign
         private static void MergeGlobalSettings(FeignService service, ServiceSetting global)
         {
             if (global == null) return;
+
+            if (service.Protocol == FeignProtocol.Http && global.Protocol != FeignProtocol.Http)
+            {
+                service.Protocol = global.Protocol;
+            }
 
             // 如果服务没有单独配置，则使用全局配置
             if (string.IsNullOrEmpty(service.Strategy) && !string.IsNullOrEmpty(global.Strategy))
@@ -105,6 +132,11 @@ namespace SyZero.Feign
             {
                 service.Retry = global.Retry;
             }
+
+            if (!service.EnableSsl && global.EnableSsl)
+            {
+                service.EnableSsl = true;
+            }
         }
 
         /// <summary>
@@ -112,21 +144,33 @@ namespace SyZero.Feign
         /// </summary>
         private static string GetServiceEndpoint(IServiceManagement serviceManagement, FeignService feignService)
         {
-            var serviceList = serviceManagement.GetService(feignService.ServiceName)
+            var serviceInstance = serviceManagement.GetServiceInstance(feignService.ServiceName)
                 .ConfigureAwait(false)
                 .GetAwaiter()
                 .GetResult();
-                
-            if (serviceList == null || serviceList.Count == 0)
+
+            if (serviceInstance == null)
             {
                 throw new Exception($"未找到服务: {feignService.ServiceName}");
             }
 
-            var serviceInstance = serviceList.FirstOrDefault();
-
-            // 根据协议类型构建端点
-            var scheme = feignService.EnableSsl ? "https" : "http";
+            var scheme = ResolveEndpointScheme(serviceInstance, feignService);
             return $"{scheme}://{serviceInstance.ServiceAddress}:{serviceInstance.ServicePort}";
+        }
+
+        private static string ResolveEndpointScheme(ServiceInfo serviceInstance, FeignService feignService)
+        {
+            if (serviceInstance.ServiceProtocol == ProtocolType.HTTPS)
+            {
+                return "https";
+            }
+
+            if (serviceInstance.ServiceProtocol == ProtocolType.HTTP)
+            {
+                return feignService.EnableSsl ? "https" : "http";
+            }
+
+            return feignService.EnableSsl ? "https" : "http";
         }
     }
 }

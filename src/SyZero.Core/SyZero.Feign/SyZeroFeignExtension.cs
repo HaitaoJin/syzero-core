@@ -19,6 +19,11 @@ namespace SyZero
         /// <exception cref="ArgumentNullException">options 为 null 时抛出</exception>
         public static IServiceCollection AddSyZeroFeign(this IServiceCollection services, FeignOptions options)
         {
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+
             if (options == null)
             {
                 throw new ArgumentNullException(nameof(options));
@@ -40,7 +45,12 @@ namespace SyZero
         /// <returns>服务集合</returns>
         public static IServiceCollection AddSyZeroFeign(this IServiceCollection services, IConfiguration configuration = null, string sectionName = FeignOptions.SectionName)
         {
-            var config = configuration ?? AppConfig.Configuration;
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+
+            var config = configuration ?? AppConfig.Configuration ?? throw new InvalidOperationException("未找到 Feign 配置源。");
             var options = new FeignOptions();
             config.GetSection(sectionName).Bind(options);
             return AddSyZeroFeign(services, options);
@@ -56,7 +66,12 @@ namespace SyZero
         /// <returns>服务集合</returns>
         public static IServiceCollection AddSyZeroFeign(this IServiceCollection services, Action<FeignOptions> optionsAction, IConfiguration configuration = null, string sectionName = FeignOptions.SectionName)
         {
-            var config = configuration ?? AppConfig.Configuration;
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+
+            var config = configuration ?? AppConfig.Configuration ?? throw new InvalidOperationException("未找到 Feign 配置源。");
             var options = new FeignOptions();
             config.GetSection(sectionName).Bind(options);
             optionsAction?.Invoke(options);

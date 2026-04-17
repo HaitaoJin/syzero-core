@@ -1,28 +1,49 @@
-﻿using log4net;
+using log4net;
+using log4net.Repository;
 using Microsoft.Extensions.Logging;
 using System;
-using System.Collections.Generic;
-using System.Text;
+using System.Collections.Concurrent;
 
 namespace SyZero.Log4Net
 {
-    public class Log4NetLoggerProvider : ILoggerProvider
+    public sealed class Log4NetLoggerProvider : ILoggerProvider
     {
-        private readonly ILog _log;
+        private readonly ILoggerRepository _repository;
+        private readonly string _defaultLoggerName;
+        private readonly ConcurrentDictionary<string, Log4NetLogger> _loggers = new ConcurrentDictionary<string, Log4NetLogger>(StringComparer.Ordinal);
+        private bool _disposed;
 
-        public Log4NetLoggerProvider(string loggerName = "DefaultLogger")
+        public Log4NetLoggerProvider(string defaultLoggerName = "DefaultLogger")
+            : this(LogManager.GetRepository(), defaultLoggerName)
         {
-            _log = LogManager.GetLogger(loggerName);
+        }
+
+        public Log4NetLoggerProvider(ILoggerRepository repository, string defaultLoggerName = "DefaultLogger")
+        {
+            _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+            if (string.IsNullOrWhiteSpace(defaultLoggerName))
+            {
+                throw new ArgumentException("Default logger name cannot be empty.", nameof(defaultLoggerName));
+            }
+
+            _defaultLoggerName = defaultLoggerName;
         }
 
         public ILogger CreateLogger(string categoryName)
         {
-            return new Log4NetLogger(_log, categoryName);
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(Log4NetLoggerProvider));
+            }
+
+            var loggerName = string.IsNullOrWhiteSpace(categoryName) ? _defaultLoggerName : categoryName;
+            return _loggers.GetOrAdd(loggerName, name => new Log4NetLogger(LogManager.GetLogger(_repository.Name, name)));
         }
 
         public void Dispose()
         {
-            // 如果需要，可以添加清理逻辑
+            _disposed = true;
+            _loggers.Clear();
         }
     }
 }

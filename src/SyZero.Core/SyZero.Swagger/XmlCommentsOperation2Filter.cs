@@ -6,7 +6,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Threading.Tasks;
 using System.Xml.XPath;
 
 namespace SyZero.Swagger
@@ -29,19 +28,47 @@ namespace SyZero.Swagger
         private MethodInfo GetGenericTypeMethodOrNullFor(MethodInfo constructedTypeMethod)
         {
             var constructedType = constructedTypeMethod.DeclaringType;
+            if (constructedType == null || !constructedType.IsConstructedGenericType)
+            {
+                return null;
+            }
+
             var genericTypeDefinition = constructedType.GetGenericTypeDefinition();
 
-            // Retrieve list of candidate methods that match name and parameter count
+            var metadataMatchedMethod = genericTypeDefinition.GetMethods()
+                .FirstOrDefault(method => method.MetadataToken == constructedTypeMethod.MetadataToken);
+            if (metadataMatchedMethod != null)
+            {
+                return metadataMatchedMethod;
+            }
+
             var candidateMethods = genericTypeDefinition.GetMethods()
-                .Where(m =>
+                .Where(method => method.Name == constructedTypeMethod.Name)
+                .Where(method => ParametersMatch(method.GetParameters(), constructedTypeMethod.GetParameters()))
+                .ToArray();
+
+            return candidateMethods.Length == 1 ? candidateMethods[0] : null;
+        }
+
+        private static bool ParametersMatch(ParameterInfo[] candidateParameters, ParameterInfo[] constructedParameters)
+        {
+            if (candidateParameters.Length != constructedParameters.Length)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < candidateParameters.Length; i++)
+            {
+                if (!string.Equals(
+                    XmlCommentsMemberNameHelper.GetQualifiedNameForXml(candidateParameters[i].ParameterType, expandGenericArgs: true),
+                    XmlCommentsMemberNameHelper.GetQualifiedNameForXml(constructedParameters[i].ParameterType, expandGenericArgs: true),
+                    StringComparison.Ordinal))
                 {
-                    return (m.Name == constructedTypeMethod.Name)
-                        && (m.GetParameters().Length == constructedTypeMethod.GetParameters().Length);
-                });
+                    return false;
+                }
+            }
 
-
-            // If inconclusive, just return null
-            return (candidateMethods.Count() == 1) ? candidateMethods.First() : null;
+            return true;
         }
 
         private void ApplyMethodXmlToOperation(OpenApiOperation operation, XPathNavigator methodNode)
@@ -93,7 +120,7 @@ namespace SyZero.Swagger
             if (context.MethodInfo == null) return;
 
             // If method is from a constructed generic type, look for comments from the generic type method
-            var targetMethod = context.MethodInfo.DeclaringType.IsConstructedGenericType
+            var targetMethod = context.MethodInfo.DeclaringType?.IsConstructedGenericType == true
                 ? GetGenericTypeMethodOrNullFor(context.MethodInfo)
                 : context.MethodInfo;
 

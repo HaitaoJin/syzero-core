@@ -97,7 +97,8 @@ namespace SyZero.SqlSugar
 
         public void DisposeTransaction()
         {
-            this.dataContext.Dispose();
+            // DbContext is scoped and disposed by DI. Avoid disposing it here,
+            // otherwise repositories in the same request may see an already disposed context.
         }
 
         public async Task<ITransactionScope> BeginTransactionAsync()

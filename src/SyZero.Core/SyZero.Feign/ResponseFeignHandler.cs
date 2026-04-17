@@ -1,46 +1,71 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text;
-using System.Threading.Tasks;
+using System.Text.Json;
 using System.Threading;
-using SyZero.Serialization;
-using SyZero.Util;
+using System.Threading.Tasks;
 
 namespace SyZero.Feign
 {
     public class ResponseFeignHandler : DelegatingHandler
     {
-        private string _serverName;
         public ResponseFeignHandler(string serverName, HttpMessageHandler innerHandler = null) : base(innerHandler ?? new HttpClientHandler())
         {
-            _serverName = serverName;
         }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            // 调用基类的方法以获取响应
             var response = await base.SendAsync(request, cancellationToken);
-
-            // 检查响应的内容类型是否为 JSON
-            if (response.Content.Headers.ContentType != null &&
-                response.Content.Headers.ContentType.MediaType == "application/json")
+            if (response.Content == null)
             {
-                var jsonString = await response.Content.ReadAsStringAsync();
-                var jsonSerialize = SyZeroUtil.GetService<IJsonSerialize>();
+                return response;
+            }
 
-                var data = jsonSerialize.JSONToObject<dynamic>(jsonString);
-                if (data.code == (int)SyMessageBoxStatus.Success)
+            var mediaType = response.Content.Headers.ContentType?.MediaType;
+            if (!string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase))
+            {
+                return response;
+            }
+
+            var jsonString = await response.Content.ReadAsStringAsync();
+            if (string.IsNullOrWhiteSpace(jsonString))
+            {
+                return response;
+            }
+
+            try
+            {
+                using var jsonDocument = JsonDocument.Parse(jsonString);
+                var root = jsonDocument.RootElement;
+                if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("code", out var codeElement))
                 {
-                    response.Content = new StringContent(jsonSerialize.ObjectToJSON(data.data));
+                    return response;
+                }
+
+                if (codeElement.GetInt32() == (int)SyMessageBoxStatus.Success)
+                {
+                    if (root.TryGetProperty("data", out var dataElement))
+                    {
+                        response.Content = CreateJsonContent(dataElement.GetRawText());
+                    }
                 }
                 else
                 {
                     response.StatusCode = System.Net.HttpStatusCode.InternalServerError;
                 }
             }
+            catch (JsonException)
+            {
+                return response;
+            }
 
             return response;
+        }
+
+        private static StringContent CreateJsonContent(string json)
+        {
+            return new StringContent(json, Encoding.UTF8, "application/json");
         }
     }
 }

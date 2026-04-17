@@ -1,7 +1,7 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
 using System;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using SyZero.Domain.Repository;
 
 namespace SyZero.EntityFrameworkCore
@@ -11,13 +11,17 @@ namespace SyZero.EntityFrameworkCore
     /// </summary>
     public class EfCoreTransactionScope : ITransactionScope
     {
+        private readonly DbContext _dbContext;
         private readonly IDbContextTransaction _transaction;
+        private readonly bool _ownsTransaction;
         private bool _committed;
         private bool _disposed;
 
-        public EfCoreTransactionScope(IDbContextTransaction transaction)
+        public EfCoreTransactionScope(DbContext dbContext, IDbContextTransaction transaction, bool ownsTransaction = true)
         {
-            _transaction = transaction;
+            _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+            _transaction = transaction ?? throw new ArgumentNullException(nameof(transaction));
+            _ownsTransaction = ownsTransaction;
         }
 
         public void Commit()
@@ -41,6 +45,7 @@ namespace SyZero.EntityFrameworkCore
             if (_disposed) return;
             if (_committed) return;
             _transaction.Rollback();
+            _dbContext.ChangeTracker.Clear();
         }
 
         public async Task RollbackAsync()
@@ -48,31 +53,63 @@ namespace SyZero.EntityFrameworkCore
             if (_disposed) return;
             if (_committed) return;
             await _transaction.RollbackAsync();
+            _dbContext.ChangeTracker.Clear();
         }
 
         public void Dispose()
         {
             if (_disposed) return;
-            _transaction.Dispose();
+            if (_ownsTransaction && !_committed)
+            {
+                try
+                {
+                    _transaction.Rollback();
+                    _dbContext.ChangeTracker.Clear();
+                }
+                catch { }
+            }
+            if (_ownsTransaction)
+            {
+                _transaction.Dispose();
+            }
             _disposed = true;
         }
 
         public async ValueTask DisposeAsync()
         {
             if (_disposed) return;
-            await _transaction.DisposeAsync();
+            if (_ownsTransaction && !_committed)
+            {
+                try
+                {
+                    await _transaction.RollbackAsync();
+                    _dbContext.ChangeTracker.Clear();
+                }
+                catch { }
+            }
+            if (_ownsTransaction)
+            {
+                await _transaction.DisposeAsync();
+            }
             _disposed = true;
         }
     }
 
-    public class UnitOfWork<TDbContext> : IUnitOfWork
-         where TDbContext : DbContext
+    public class UnitOfWork : UnitOfWork<DbContext>
     {
-        private TDbContext dataContext;
-
-        public UnitOfWork(TDbContext _dataContext)
+        public UnitOfWork(DbContext dataContext) : base(dataContext)
         {
-            this.dataContext = _dataContext;
+        }
+    }
+
+    public class UnitOfWork<TDbContext> : IUnitOfWork
+        where TDbContext : DbContext
+    {
+        private readonly TDbContext dataContext;
+
+        public UnitOfWork(TDbContext dataContext)
+        {
+            this.dataContext = dataContext ?? throw new ArgumentNullException(nameof(dataContext));
         }
 
         public void BeginTransaction()
@@ -87,6 +124,7 @@ namespace SyZero.EntityFrameworkCore
         {
             if (dataContext.Database.CurrentTransaction != null)
             {
+                dataContext.SaveChanges();
                 dataContext.Database.CurrentTransaction.Commit();
             }
         }
@@ -96,6 +134,7 @@ namespace SyZero.EntityFrameworkCore
             if (dataContext.Database.CurrentTransaction != null)
             {
                 dataContext.Database.CurrentTransaction.Rollback();
+                dataContext.ChangeTracker.Clear();
             }
         }
 
@@ -110,7 +149,7 @@ namespace SyZero.EntityFrameworkCore
         public async Task<ITransactionScope> BeginTransactionAsync()
         {
             var transaction = await dataContext.Database.BeginTransactionAsync();
-            return new EfCoreTransactionScope(transaction);
+            return new EfCoreTransactionScope(dataContext, transaction);
         }
 
         public void ExecuteInTransaction(Action action)
@@ -119,11 +158,13 @@ namespace SyZero.EntityFrameworkCore
             try
             {
                 action();
+                dataContext.SaveChanges();
                 transaction.Commit();
             }
             catch
             {
                 transaction.Rollback();
+                dataContext.ChangeTracker.Clear();
                 throw;
             }
         }
@@ -134,12 +175,14 @@ namespace SyZero.EntityFrameworkCore
             try
             {
                 var result = func();
+                dataContext.SaveChanges();
                 transaction.Commit();
                 return result;
             }
             catch
             {
                 transaction.Rollback();
+                dataContext.ChangeTracker.Clear();
                 throw;
             }
         }
@@ -148,6 +191,7 @@ namespace SyZero.EntityFrameworkCore
         {
             await using var scope = await BeginTransactionAsync();
             await func();
+            await dataContext.SaveChangesAsync();
             await scope.CommitAsync();
         }
 
@@ -155,6 +199,7 @@ namespace SyZero.EntityFrameworkCore
         {
             await using var scope = await BeginTransactionAsync();
             var result = await func();
+            await dataContext.SaveChangesAsync();
             await scope.CommitAsync();
             return result;
         }

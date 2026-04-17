@@ -1,5 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Security.Cryptography;
 
 namespace SyZero.Web.Common
 {
@@ -16,14 +18,36 @@ namespace SyZero.Web.Common
         /// <param name="probabilities"></param>
         public void Initialization(List<Double> probabilities)
         {
-            _probability = new double[probabilities.Count];
-            _alias = new int[probabilities.Count];
-            double average = 1.0 / probabilities.Count;
+            if (probabilities == null)
+            {
+                throw new ArgumentNullException(nameof(probabilities));
+            }
+
+            if (probabilities.Count == 0)
+            {
+                throw new ArgumentException("Probabilities cannot be empty.", nameof(probabilities));
+            }
+
+            if (probabilities.Any(value => value < 0 || double.IsNaN(value) || double.IsInfinity(value)))
+            {
+                throw new ArgumentException("Probabilities must be finite and non-negative.", nameof(probabilities));
+            }
+
+            var total = probabilities.Sum();
+            if (total <= 0)
+            {
+                throw new ArgumentException("At least one probability must be greater than zero.", nameof(probabilities));
+            }
+
+            var normalizedProbabilities = probabilities.Select(value => value / total).ToArray();
+            _probability = new double[normalizedProbabilities.Length];
+            _alias = new int[normalizedProbabilities.Length];
+            double average = 1.0 / normalizedProbabilities.Length;
             var small = new Stack<int>();
             var large = new Stack<int>();
-            for (int i = 0; i < probabilities.Count; ++i)
+            for (int i = 0; i < normalizedProbabilities.Length; ++i)
             {
-                if (probabilities[i] >= average)
+                if (normalizedProbabilities[i] >= average)
                     large.Push(i);
                 else
                     small.Push(i);
@@ -32,10 +56,10 @@ namespace SyZero.Web.Common
             {
                 int less = small.Pop();
                 int more = large.Pop();
-                _probability[less] = probabilities[less] * probabilities.Count;
+                _probability[less] = normalizedProbabilities[less] * normalizedProbabilities.Length;
                 _alias[less] = more;
-                probabilities[more] = (probabilities[more] + probabilities[less] - average);
-                if (probabilities[more] >= average)
+                normalizedProbabilities[more] = normalizedProbabilities[more] + normalizedProbabilities[less] - average;
+                if (normalizedProbabilities[more] >= average)
                     large.Push(more);
                 else
                     small.Push(more);
@@ -53,19 +77,23 @@ namespace SyZero.Web.Common
         /// <returns></returns>
         public int Next()
         {
-            long tick = DateTime.Now.Ticks;
-            var seed = ((int)(tick & 0xffffffffL) | (int)(tick >> 32));
-            unchecked
+            if (_probability == null || _alias == null || _probability.Length == 0)
             {
-                seed = (seed + Guid.NewGuid().GetHashCode() + new Random().Next(0, 100));
+                throw new InvalidOperationException("AliasMethod has not been initialized.");
             }
-            var random = new Random(seed);
-            int column = random.Next(_probability.Length);
 
-            /* Generate a biased coin toss to determine which option to pick. */
-            bool coinToss = random.NextDouble() < _probability[column];
+            int column = RandomNumberGenerator.GetInt32(_probability.Length);
+
+            bool coinToss = NextDouble() < _probability[column];
 
             return coinToss ? column : _alias[column];
+        }
+
+        private static double NextDouble()
+        {
+            var bytes = new byte[8];
+            RandomNumberGenerator.Fill(bytes);
+            return BitConverter.ToUInt64(bytes, 0) / ((double)ulong.MaxValue + 1);
         }
     }
 }

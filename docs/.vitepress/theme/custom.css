@@ -1,0 +1,53 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Space+Grotesk:wght@500;700&display=swap");
+
+:root {
+  --vp-font-family-base: "Noto Sans SC", "Segoe UI", sans-serif;
+  --vp-font-family-mono: "Cascadia Code", "Fira Code", monospace;
+  --vp-c-brand-1: #0f766e;
+  --vp-c-brand-2: #0ea5a1;
+  --vp-c-brand-3: #14b8a6;
+  --vp-c-brand-soft: rgba(20, 184, 166, 0.14);
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #134e4a 10%, #0ea5a1 45%, #065f46 90%);
+  --vp-home-hero-image-background-image: radial-gradient(circle at 25% 20%, rgba(20, 184, 166, 0.38), transparent 45%),
+    radial-gradient(circle at 75% 35%, rgba(14, 165, 233, 0.33), transparent 42%),
+    linear-gradient(120deg, rgba(6, 95, 70, 0.26), rgba(8, 47, 73, 0.16));
+  --vp-home-hero-image-filter: blur(72px);
+}
+
+.VPNavBar .title {
+  font-family: "Space Grotesk", "Noto Sans SC", sans-serif;
+  letter-spacing: 0.3px;
+}
+
+.VPHome .name,
+.VPHome .text {
+  font-family: "Space Grotesk", "Noto Sans SC", sans-serif;
+}
+
+.VPFeature {
+  border: 1px solid rgba(15, 118, 110, 0.2);
+  background: linear-gradient(170deg, rgba(255, 255, 255, 0.95), rgba(240, 253, 250, 0.92));
+}
+
+.dark .VPFeature {
+  background: linear-gradient(170deg, rgba(9, 33, 31, 0.92), rgba(8, 47, 73, 0.84));
+  border-color: rgba(45, 212, 191, 0.34);
+}
+
+.main .vp-doc h1,
+.main .vp-doc h2,
+.main .vp-doc h3 {
+  font-family: "Space Grotesk", "Noto Sans SC", sans-serif;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .VPFeature {
+    transition: transform 0.24s ease, border-color 0.24s ease;
+  }
+
+  .VPFeature:hover {
+    transform: translateY(-3px);
+    border-color: rgba(13, 148, 136, 0.62);
+  }
+}

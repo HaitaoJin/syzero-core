@@ -1,0 +1,55 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/SyZero.Core/">
+    <Project Path="src/SyZero.Core/SyZero.ApiGateway/SyZero.ApiGateway.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.AspNetCore.SpaProxy/SyZero.AspNetCore.SpaProxy.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.AspNetCore/SyZero.AspNetCore.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.AutoMapper/SyZero.AutoMapper.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.Consul/SyZero.Consul.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.DynamicGrpc/SyZero.DynamicGrpc.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.DynamicWebApi/SyZero.DynamicWebApi.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.EntityFrameworkCore/SyZero.EntityFrameworkCore.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.Feign/SyZero.Feign.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.Log4Net/SyZero.Log4Net.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.MongoDB/SyZero.MongoDB.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.Nacos/SyZero.Nacos.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.OpenTelemetry/SyZero.OpenTelemetry.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.RabbitMQ/SyZero.RabbitMQ.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.Redis/SyZero.Redis.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.SqlSugar/SyZero.SqlSugar.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.Swagger/SyZero.Swagger.csproj" />
+    <Project Path="src/SyZero.Core/SyZero.Web.Common/SyZero.Web.Common.csproj" />
+    <Project Path="src/SyZero.Core/SyZero/SyZero.csproj" />
+  </Folder>
+  <Folder Name="/SyZero.Gateway/">
+    <Project Path="src/SyZero.Gateway/SyZero.Gateway.csproj" />
+  </Folder>
+  <Folder Name="/SyZero.Service/" />
+  <Folder Name="/SyZero.Service/SyZero.Example1.Service/">
+    <Project Path="src/SyZero.Service/SyZero.Example1.Service/SyZero.Example1.Application/SyZero.Example1.Application.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+    <Project Path="src/SyZero.Service/SyZero.Example1.Service/SyZero.Example1.Core/SyZero.Example1.Core.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+    <Project Path="src/SyZero.Service/SyZero.Example1.Service/SyZero.Example1.IApplication/SyZero.Example1.IApplication.csproj" />
+    <Project Path="src/SyZero.Service/SyZero.Example1.Service/SyZero.Example1.Web/SyZero.Example1.Web.csproj" />
+  </Folder>
+  <Folder Name="/SyZero.Service/SyZero.Example2.Service/">
+    <Project Path="src/SyZero.Service/SyZero.Example2.Service/SyZero.Example2.Application/SyZero.Example2.Application.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+    <Project Path="src/SyZero.Service/SyZero.Example2.Service/SyZero.Example2.Core/SyZero.Example2.Core.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+    <Project Path="src/SyZero.Service/SyZero.Example2.Service/SyZero.Example2.IApplication/SyZero.Example2.IApplication.csproj" />
+    <Project Path="src/SyZero.Service/SyZero.Example2.Service/SyZero.Example2.Web/SyZero.Example2.Web.csproj" />
+  </Folder>
+  <Folder Name="/SyZero.Tests/">
+    <Project Path="src/SyZero.Tests/SyZero.Tests.csproj" />
+  </Folder>
+</Solution>

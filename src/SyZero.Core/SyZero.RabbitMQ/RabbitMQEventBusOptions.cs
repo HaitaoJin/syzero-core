@@ -61,6 +61,12 @@ namespace SyZero.RabbitMQ
         public string QueueNamePrefix { get; set; } = "syzero";
 
         /// <summary>
+        /// 队列名称
+        /// <para>默认值: null（自动生成）</para>
+        /// </summary>
+        public string QueueName { get; set; }
+
+        /// <summary>
         /// 客户端提供的名称
         /// <para>默认值: SyZero.EventBus</para>
         /// </summary>
@@ -143,5 +149,101 @@ namespace SyZero.RabbitMQ
         /// <para>默认值: 60</para>
         /// </summary>
         public ushort RequestedHeartbeat { get; set; } = 60;
+
+        /// <summary>
+        /// 验证并规范化配置
+        /// </summary>
+        public void Validate()
+        {
+            if (string.IsNullOrWhiteSpace(HostName))
+            {
+                HostName = "localhost";
+            }
+
+            if (Port <= 0)
+            {
+                Port = 5672;
+            }
+
+            if (string.IsNullOrWhiteSpace(UserName))
+            {
+                UserName = "guest";
+            }
+
+            if (string.IsNullOrWhiteSpace(Password))
+            {
+                Password = "guest";
+            }
+
+            if (string.IsNullOrWhiteSpace(VirtualHost))
+            {
+                VirtualHost = "/";
+            }
+
+            if (string.IsNullOrWhiteSpace(ExchangeName))
+            {
+                ExchangeName = "syzero_event_bus";
+            }
+
+            if (string.IsNullOrWhiteSpace(ExchangeType))
+            {
+                ExchangeType = "topic";
+            }
+
+            if (string.IsNullOrWhiteSpace(QueueNamePrefix))
+            {
+                QueueNamePrefix = "syzero";
+            }
+
+            if (string.IsNullOrWhiteSpace(QueueName))
+            {
+                QueueName = null;
+            }
+
+            if (string.IsNullOrWhiteSpace(ClientProvidedName))
+            {
+                ClientProvidedName = "SyZero.EventBus";
+            }
+
+            if (RetryCount <= 0)
+            {
+                RetryCount = 3;
+            }
+
+            if (RetryIntervalMilliseconds < 0)
+            {
+                RetryIntervalMilliseconds = 1000;
+            }
+
+            if (PrefetchCount == 0)
+            {
+                PrefetchCount = 1;
+            }
+
+            if (EnableDeadLetter && string.IsNullOrWhiteSpace(DeadLetterExchangeName))
+            {
+                DeadLetterExchangeName = "syzero_event_bus_dlx";
+            }
+
+            if (MessageTTL <= 0)
+            {
+                MessageTTL = null;
+            }
+
+            if (MaxLength <= 0)
+            {
+                MaxLength = null;
+            }
+
+            if (RequestedConnectionTimeout <= 0)
+            {
+                RequestedConnectionTimeout = 30000;
+            }
+
+            if (RequestedHeartbeat == 0)
+            {
+                RequestedHeartbeat = 60;
+            }
+        }
     }
 }

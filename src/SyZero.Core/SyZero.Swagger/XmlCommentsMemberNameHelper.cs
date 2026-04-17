@@ -11,7 +11,7 @@ namespace SyZero.Swagger
         {
             var builder = new StringBuilder("M:");
 
-            builder.Append(QualifiedNameFor(method.DeclaringType));
+            builder.Append(GetQualifiedNameForXml(method.DeclaringType));
             builder.Append($".{method.Name}");
 
             var parameters = method.GetParameters();
@@ -21,7 +21,7 @@ namespace SyZero.Swagger
                 {
                     return p.ParameterType.IsGenericParameter
                         ? $"`{p.ParameterType.GenericParameterPosition}"
-                        : QualifiedNameFor(p.ParameterType, expandGenericArgs: true);
+                        : GetQualifiedNameForXml(p.ParameterType, expandGenericArgs: true);
                 });
                 builder.Append($"({string.Join(",", parametersNames)})");
             }
@@ -42,7 +42,7 @@ namespace SyZero.Swagger
                 }
             }
           
-            builder.Append(QualifiedNameFor(method.DeclaringType));
+            builder.Append(GetQualifiedNameForXml(method.DeclaringType));
             builder.Append($".{method.Name}");
 
             var parameters = method.GetParameters();
@@ -52,7 +52,7 @@ namespace SyZero.Swagger
                 {
                     return p.ParameterType.IsGenericParameter
                         ? $"`{p.ParameterType.GenericParameterPosition}"
-                        : QualifiedNameFor(p.ParameterType, expandGenericArgs: true);
+                        : GetQualifiedNameForXml(p.ParameterType, expandGenericArgs: true);
                 });
                 builder.Append($"({string.Join(",", parametersNames)})");
             }
@@ -63,7 +63,7 @@ namespace SyZero.Swagger
         public static string GetMemberNameForType(Type type)
         {
             var builder = new StringBuilder("T:");
-            builder.Append(QualifiedNameFor(type));
+            builder.Append(GetQualifiedNameForXml(type));
 
             return builder.ToString();
         }
@@ -71,16 +71,16 @@ namespace SyZero.Swagger
         public static string GetMemberNameForMember(MemberInfo memberInfo)
         {
             var builder = new StringBuilder(((memberInfo.MemberType & MemberTypes.Field) != 0) ? "F:" : "P:");
-            builder.Append(QualifiedNameFor(memberInfo.DeclaringType));
+            builder.Append(GetQualifiedNameForXml(memberInfo.DeclaringType));
             builder.Append($".{memberInfo.Name}");
 
             return builder.ToString();
         }
 
-        private static string QualifiedNameFor(Type type, bool expandGenericArgs = false)
+        public static string GetQualifiedNameForXml(Type type, bool expandGenericArgs = false)
         {
             if (type.IsArray)
-                return $"{QualifiedNameFor(type.GetElementType(), expandGenericArgs)}[]";
+                return $"{GetQualifiedNameForXml(type.GetElementType(), expandGenericArgs)}[]";
 
             var builder = new StringBuilder();
 
@@ -99,7 +99,7 @@ namespace SyZero.Swagger
                 {
                     return t.IsGenericParameter
                         ? $"`{t.GenericParameterPosition}"
-                        : QualifiedNameFor(t, true);
+                        : GetQualifiedNameForXml(t, true);
                 });
 
                 builder.Append($"{{{string.Join(",", genericArgsNames)}}}");

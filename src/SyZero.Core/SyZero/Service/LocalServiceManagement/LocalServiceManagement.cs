@@ -22,11 +22,12 @@ namespace SyZero.Service.LocalServiceManagement
         private readonly ConcurrentDictionary<string, List<ServiceInfo>> _services = new ConcurrentDictionary<string, List<ServiceInfo>>();
         private readonly ConcurrentDictionary<string, Action<List<ServiceInfo>>> _subscriptions = new ConcurrentDictionary<string, Action<List<ServiceInfo>>>();
         private readonly ConcurrentDictionary<string, bool> _healthStatus = new ConcurrentDictionary<string, bool>();
-        private readonly Random _random = new Random();
+        private static readonly ThreadLocal<Random> RandomProvider = new ThreadLocal<Random>(() => new Random(Guid.NewGuid().GetHashCode()));
         private readonly LocalServiceManagementOptions _options;
         private readonly string _dataFilePath;
         private readonly string _leaderLockFilePath;
         private readonly string _instanceId;
+        private readonly object _stateLock = new object();
         private readonly object _fileLock = new object();
         private readonly HttpClient _httpClient;
         private FileSystemWatcher _fileWatcher;
@@ -97,7 +98,7 @@ namespace SyZero.Service.LocalServiceManagement
             if (_options.EnableHealthCheck)
             {
                 _healthCheckTimer = new Timer(
-                    _ => PerformHealthCheckAsync().ConfigureAwait(false),
+                    _ => RunBackgroundTask(PerformHealthCheckAsync, "健康检查"),
                     null,
                     TimeSpan.FromSeconds(_options.HealthCheckIntervalSeconds),
                     TimeSpan.FromSeconds(_options.HealthCheckIntervalSeconds));
@@ -107,7 +108,7 @@ namespace SyZero.Service.LocalServiceManagement
             if (_options.AutoCleanExpiredServices)
             {
                 _cleanupTimer = new Timer(
-                    _ => CleanExpiredServicesAsync().ConfigureAwait(false),
+                    _ => RunBackgroundTask(CleanExpiredServicesAsync, "清理过期服务"),
                     null,
                     TimeSpan.FromSeconds(_options.AutoCleanIntervalSeconds),
                     TimeSpan.FromSeconds(_options.AutoCleanIntervalSeconds));
@@ -240,24 +241,33 @@ namespace SyZero.Service.LocalServiceManagement
 
         public Task<List<ServiceInfo>> GetService(string serviceName)
         {
-            if (_services.TryGetValue(serviceName, out var services))
+            lock (_stateLock)
             {
-                return Task.FromResult(services.ToList());
+                if (_services.TryGetValue(serviceName, out var services))
+                {
+                    return Task.FromResult(CloneServices(services));
+                }
             }
+
             return Task.FromResult(new List<ServiceInfo>());
         }
 
         public Task<List<ServiceInfo>> GetHealthyServices(string serviceName)
         {
-            if (_services.TryGetValue(serviceName, out var services))
+            lock (_stateLock)
             {
-                var healthyServices = services.Where(s => 
-                    s.Enabled && 
-                    s.IsHealthy &&
-                    (!_healthStatus.TryGetValue(s.ServiceID, out var isHealthy) || isHealthy)
-                ).ToList();
-                return Task.FromResult(healthyServices);
+                if (_services.TryGetValue(serviceName, out var services))
+                {
+                    var healthyServices = services.Where(s =>
+                        s.Enabled &&
+                        s.IsHealthy &&
+                        (!_healthStatus.TryGetValue(s.ServiceID, out var isHealthy) || isHealthy))
+                        .Select(CloneServiceInfo)
+                        .ToList();
+                    return Task.FromResult(healthyServices);
+                }
             }
+
             return Task.FromResult(new List<ServiceInfo>());
         }
 
@@ -272,16 +282,16 @@ namespace SyZero.Service.LocalServiceManagement
             return SelectByWeight(services);
         }
 
-        private ServiceInfo SelectByWeight(List<ServiceInfo> services)
+        private static ServiceInfo SelectByWeight(List<ServiceInfo> services)
         {
             var totalWeight = services.Sum(s => s.Weight);
             if (totalWeight <= 0)
             {
                 // 如果没有权重，使用简单随机
-                return services[_random.Next(services.Count)];
+                return services[GetRandom().Next(services.Count)];
             }
 
-            var randomWeight = _random.NextDouble() * totalWeight;
+            var randomWeight = GetRandom().NextDouble() * totalWeight;
             var currentWeight = 0.0;
             foreach (var service in services)
             {
@@ -296,7 +306,10 @@ namespace SyZero.Service.LocalServiceManagement
 
         public Task<List<string>> GetAllServices()
         {
-            return Task.FromResult(_services.Keys.ToList());
+            lock (_stateLock)
+            {
+                return Task.FromResult(_services.Keys.ToList());
+            }
         }
 
         #endregion
@@ -325,23 +338,25 @@ namespace SyZero.Service.LocalServiceManagement
                 serviceInfo.Metadata = new Dictionary<string, string>();
             }
 
-            _services.AddOrUpdate(
-                serviceInfo.ServiceName,
-                new List<ServiceInfo> { serviceInfo },
-                (key, existingList) =>
-                {
-                    // 检查是否已存在相同ID的服务
-                    var existing = existingList.FirstOrDefault(s => s.ServiceID == serviceInfo.ServiceID);
-                    if (existing != null)
+            lock (_stateLock)
+            {
+                _services.AddOrUpdate(
+                    serviceInfo.ServiceName,
+                    _ => new List<ServiceInfo> { CloneServiceInfo(serviceInfo) },
+                    (_, existingList) =>
                     {
-                        existingList.Remove(existing);
-                    }
-                    existingList.Add(serviceInfo);
-                    return existingList;
-                });
+                        var existing = existingList.FirstOrDefault(s => s.ServiceID == serviceInfo.ServiceID);
+                        if (existing != null)
+                        {
+                            existingList.Remove(existing);
+                        }
 
-            // 默认设置为健康状态
-            _healthStatus[serviceInfo.ServiceID] = serviceInfo.IsHealthy;
+                        existingList.Add(CloneServiceInfo(serviceInfo));
+                        return existingList;
+                    });
+
+                _healthStatus[serviceInfo.ServiceID] = serviceInfo.IsHealthy;
+            }
 
             // 持久化到文件
             SaveToFile();
@@ -354,28 +369,38 @@ namespace SyZero.Service.LocalServiceManagement
 
         public Task DeregisterService(string serviceId)
         {
-            foreach (var kvp in _services)
+            string changedServiceName = null;
+
+            lock (_stateLock)
             {
-                var service = kvp.Value.FirstOrDefault(s => s.ServiceID == serviceId);
-                if (service != null)
+                foreach (var kvp in _services)
                 {
+                    var service = kvp.Value.FirstOrDefault(s => s.ServiceID == serviceId);
+                    if (service == null)
+                    {
+                        continue;
+                    }
+
                     kvp.Value.Remove(service);
                     _healthStatus.TryRemove(serviceId, out _);
 
-                    // 如果该服务名下没有实例了，移除整个键
                     if (kvp.Value.Count == 0)
                     {
                         _services.TryRemove(kvp.Key, out _);
                     }
 
-                    // 持久化到文件
-                    SaveToFile();
-
-                    // 通知订阅者
-                    NotifySubscribers(kvp.Key);
+                    changedServiceName = kvp.Key;
                     break;
                 }
             }
+
+            if (changedServiceName == null)
+            {
+                return Task.CompletedTask;
+            }
+
+            SaveToFile();
+            NotifySubscribers(changedServiceName);
 
             return Task.CompletedTask;
         }
@@ -397,16 +422,24 @@ namespace SyZero.Service.LocalServiceManagement
         /// <param name="isHealthy">是否健康</param>
         public void SetServiceHealth(string serviceId, bool isHealthy)
         {
-            _healthStatus[serviceId] = isHealthy;
-
-            // 查找服务名称并通知订阅者
-            foreach (var kvp in _services)
+            string changedServiceName = null;
+            lock (_stateLock)
             {
-                if (kvp.Value.Any(s => s.ServiceID == serviceId))
+                _healthStatus[serviceId] = isHealthy;
+
+                foreach (var kvp in _services)
                 {
-                    NotifySubscribers(kvp.Key);
-                    break;
+                    if (kvp.Value.Any(s => s.ServiceID == serviceId))
+                    {
+                        changedServiceName = kvp.Key;
+                        break;
+                    }
                 }
+            }
+
+            if (changedServiceName != null)
+            {
+                NotifySubscribers(changedServiceName);
             }
         }
 
@@ -422,22 +455,39 @@ namespace SyZero.Service.LocalServiceManagement
             }
 
             var changedServices = new HashSet<string>();
+            List<(string ServiceName, ServiceInfo Service)> servicesToCheck;
 
-            foreach (var kvp in _services)
+            lock (_stateLock)
             {
-                foreach (var service in kvp.Value.ToList())
-                {
-                    // 使用服务实例的 IsHealthy 作为前一个状态
-                    var previousHealth = service.IsHealthy;
-                    var currentHealth = await CheckServiceHealthAsync(service);
+                servicesToCheck = _services
+                    .SelectMany(kvp => kvp.Value.Select(service => (kvp.Key, CloneServiceInfo(service))))
+                    .ToList();
+            }
 
-                    // 更新健康状态
+            foreach (var (serviceName, serviceSnapshot) in servicesToCheck)
+            {
+                var currentHealth = await CheckServiceHealthAsync(serviceSnapshot);
+
+                lock (_stateLock)
+                {
+                    if (!_services.TryGetValue(serviceName, out var services))
+                    {
+                        continue;
+                    }
+
+                    var service = services.FirstOrDefault(item => item.ServiceID == serviceSnapshot.ServiceID);
+                    if (service == null)
+                    {
+                        continue;
+                    }
+
+                    var previousHealth = service.IsHealthy;
                     _healthStatus[service.ServiceID] = currentHealth;
-                    
+
                     if (previousHealth != currentHealth)
                     {
                         service.IsHealthy = currentHealth;
-                        changedServices.Add(kvp.Key);
+                        changedServices.Add(serviceName);
                     }
                 }
             }
@@ -495,18 +545,24 @@ namespace SyZero.Service.LocalServiceManagement
         /// <param name="serviceId">服务ID</param>
         public Task HeartbeatAsync(string serviceId)
         {
-            foreach (var kvp in _services)
+            lock (_stateLock)
             {
-                var service = kvp.Value.FirstOrDefault(s => s.ServiceID == serviceId);
-                if (service != null)
+                foreach (var kvp in _services)
                 {
+                    var service = kvp.Value.FirstOrDefault(s => s.ServiceID == serviceId);
+                    if (service == null)
+                    {
+                        continue;
+                    }
+
                     service.LastHeartbeat = DateTime.UtcNow;
                     service.IsHealthy = true;
                     _healthStatus[serviceId] = true;
-                    SaveToFile();
                     break;
                 }
             }
+
+            SaveToFile();
             return Task.CompletedTask;
         }
 
@@ -526,25 +582,27 @@ namespace SyZero.Service.LocalServiceManagement
                 var changedServices = new HashSet<string>();
                 var now = DateTime.UtcNow;
 
-                foreach (var kvp in _services.ToList())
+                lock (_stateLock)
                 {
-                    var expiredServices = kvp.Value
-                        .Where(s => s.LastHeartbeat.HasValue &&
-                                   (now - s.LastHeartbeat.Value).TotalSeconds > _options.ServiceCleanSeconds)
-                        .ToList();
-
-                    foreach (var service in expiredServices)
+                    foreach (var kvp in _services.ToList())
                     {
-                        kvp.Value.Remove(service);
-                        _healthStatus.TryRemove(service.ServiceID, out _);
-                        changedServices.Add(kvp.Key);
-                        Console.WriteLine($"SyZero.Local: 自动清理过期服务 [{service.ServiceName}] ID={service.ServiceID}");
-                    }
+                        var expiredServices = kvp.Value
+                            .Where(s => s.LastHeartbeat.HasValue &&
+                                        (now - s.LastHeartbeat.Value).TotalSeconds > _options.ServiceCleanSeconds)
+                            .ToList();
 
-                    // 如果该服务名下没有实例了，移除整个键
-                    if (kvp.Value.Count == 0)
-                    {
-                        _services.TryRemove(kvp.Key, out _);
+                        foreach (var service in expiredServices)
+                        {
+                            kvp.Value.Remove(service);
+                            _healthStatus.TryRemove(service.ServiceID, out _);
+                            changedServices.Add(kvp.Key);
+                            Console.WriteLine($"SyZero.Local: 自动清理过期服务 [{service.ServiceName}] ID={service.ServiceID}");
+                        }
+
+                        if (kvp.Value.Count == 0)
+                        {
+                            _services.TryRemove(kvp.Key, out _);
+                        }
                     }
                 }
 
@@ -585,14 +643,15 @@ namespace SyZero.Service.LocalServiceManagement
         {
             if (_subscriptions.TryGetValue(serviceName, out var callback))
             {
-                if (_services.TryGetValue(serviceName, out var services))
+                List<ServiceInfo> services;
+                lock (_stateLock)
                 {
-                    callback?.Invoke(services.ToList());
+                    services = _services.TryGetValue(serviceName, out var currentServices)
+                        ? CloneServices(currentServices)
+                        : new List<ServiceInfo>();
                 }
-                else
-                {
-                    callback?.Invoke(new List<ServiceInfo>());
-                }
+
+                callback?.Invoke(services);
             }
         }
 
@@ -613,8 +672,8 @@ namespace SyZero.Service.LocalServiceManagement
                 {
                     var data = new LocalServiceData
                     {
-                        Services = _services.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
-                        HealthStatus = _healthStatus.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                        Services = SnapshotServices(),
+                        HealthStatus = SnapshotHealthStatus(),
                         LastModified = DateTime.UtcNow
                     };
 
@@ -652,16 +711,19 @@ namespace SyZero.Service.LocalServiceManagement
 
                         if (data != null)
                         {
-                            _services.Clear();
-                            foreach (var kvp in data.Services)
+                            lock (_stateLock)
                             {
-                                _services[kvp.Key] = kvp.Value;
-                            }
+                                _services.Clear();
+                                foreach (var kvp in data.Services ?? new Dictionary<string, List<ServiceInfo>>())
+                                {
+                                    _services[kvp.Key] = CloneServices(kvp.Value ?? new List<ServiceInfo>());
+                                }
 
-                            _healthStatus.Clear();
-                            foreach (var kvp in data.HealthStatus)
-                            {
-                                _healthStatus[kvp.Key] = kvp.Value;
+                                _healthStatus.Clear();
+                                foreach (var kvp in data.HealthStatus ?? new Dictionary<string, bool>())
+                                {
+                                    _healthStatus[kvp.Key] = kvp.Value;
+                                }
                             }
                         }
                     }
@@ -718,8 +780,11 @@ namespace SyZero.Service.LocalServiceManagement
         /// </summary>
         public void Clear()
         {
-            _services.Clear();
-            _healthStatus.Clear();
+            lock (_stateLock)
+            {
+                _services.Clear();
+                _healthStatus.Clear();
+            }
 
             SaveToFile();
 
@@ -734,6 +799,73 @@ namespace SyZero.Service.LocalServiceManagement
         /// 获取数据文件路径
         /// </summary>
         public string GetDataFilePath() => _dataFilePath;
+
+        private static Random GetRandom()
+        {
+            return RandomProvider.Value ?? new Random(Guid.NewGuid().GetHashCode());
+        }
+
+        private Dictionary<string, List<ServiceInfo>> SnapshotServices()
+        {
+            lock (_stateLock)
+            {
+                return _services.ToDictionary(kvp => kvp.Key, kvp => CloneServices(kvp.Value));
+            }
+        }
+
+        private Dictionary<string, bool> SnapshotHealthStatus()
+        {
+            lock (_stateLock)
+            {
+                return _healthStatus.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+            }
+        }
+
+        private static List<ServiceInfo> CloneServices(IEnumerable<ServiceInfo> services)
+        {
+            return services.Select(CloneServiceInfo).ToList();
+        }
+
+        private static ServiceInfo CloneServiceInfo(ServiceInfo service)
+        {
+            return new ServiceInfo
+            {
+                ServiceID = service.ServiceID,
+                ServiceName = service.ServiceName,
+                ServiceAddress = service.ServiceAddress,
+                ServicePort = service.ServicePort,
+                ServiceProtocol = service.ServiceProtocol,
+                Version = service.Version,
+                Group = service.Group,
+                Tags = service.Tags != null ? new List<string>(service.Tags) : new List<string>(),
+                Metadata = service.Metadata != null ? new Dictionary<string, string>(service.Metadata) : new Dictionary<string, string>(),
+                IsHealthy = service.IsHealthy,
+                Enabled = service.Enabled,
+                Weight = service.Weight,
+                RegisterTime = service.RegisterTime,
+                LastHeartbeat = service.LastHeartbeat,
+                HealthCheckUrl = service.HealthCheckUrl,
+                HealthCheckIntervalSeconds = service.HealthCheckIntervalSeconds,
+                HealthCheckTimeoutSeconds = service.HealthCheckTimeoutSeconds,
+                Region = service.Region,
+                Zone = service.Zone
+            };
+        }
+
+        private void RunBackgroundTask(Func<Task> taskFactory, string operationName)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await taskFactory();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"SyZero.Local: {operationName}失败: {ex.Message}");
+                }
+            });
+        }
 
         /// <summary>
         /// 释放资源

@@ -1,0 +1,14 @@
+<Project>
+  <Target Name="SyZeroGenerateSwaggerJson" AfterTargets="Build"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(GenerateSwaggerJsonOnBuild)' == 'true'">
+    <Message Importance="High" Condition="'$(SwaggerOutputFile)' != ''" Text="Generating Swagger JSON: $(SwaggerOutputFile)" />
+    <Message Importance="High" Condition="'$(SwaggerOutputFile)' == ''" Text="Generating Swagger JSON: $(TargetDir)swagger.json" />
+    <MakeDir Condition="'$(SwaggerOutputFile)' != ''" Directories="$([System.IO.Path]::GetDirectoryName('$(SwaggerOutputFile)'))" />
+    <Exec Condition="'$(SwaggerOutputFile)' != ''"
+          Command="dotnet &quot;$(TargetPath)&quot; --swagger-output &quot;$(SwaggerOutputFile)&quot;"
+          WorkingDirectory="$(TargetDir)" />
+    <Exec Condition="'$(SwaggerOutputFile)' == ''"
+          Command="dotnet &quot;$(TargetPath)&quot; --swagger-output &quot;$(TargetDir)swagger.json&quot;"
+          WorkingDirectory="$(TargetDir)" />
+  </Target>
+</Project>

@@ -26,8 +26,12 @@ namespace SyZero.RabbitMQ
         private readonly ConcurrentDictionary<string, List<Type>> _subscriptions;
         private readonly ConcurrentDictionary<string, List<Type>> _dynamicSubscriptions;
         private readonly ConcurrentDictionary<string, Func<object>> _handlerFactories;
+        private readonly object _subscriptionLock = new object();
+        private readonly object _consumerLock = new object();
+        private readonly bool _deleteQueueOnDispose;
         private IModel _consumerChannel;
         private string _queueName;
+        private string _consumerTag;
         private bool _disposed = false;
 
         /// <summary>
@@ -43,12 +47,16 @@ namespace SyZero.RabbitMQ
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
             _options = options ?? throw new ArgumentNullException(nameof(options));
+            _options.Validate();
 
             _subscriptions = new ConcurrentDictionary<string, List<Type>>();
             _dynamicSubscriptions = new ConcurrentDictionary<string, List<Type>>();
             _handlerFactories = new ConcurrentDictionary<string, Func<object>>();
 
-            _queueName = $"{_options.QueueNamePrefix}_{Guid.NewGuid()}";
+            _deleteQueueOnDispose = string.IsNullOrWhiteSpace(_options.QueueName);
+            _queueName = string.IsNullOrWhiteSpace(_options.QueueName)
+                ? $"{_options.QueueNamePrefix}_{Guid.NewGuid():N}"
+                : _options.QueueName;
             _consumerChannel = CreateConsumerChannel();
         }
 
@@ -83,19 +91,28 @@ namespace SyZero.RabbitMQ
         {
             var eventName = GetEventKey<T>();
             var handlerType = typeof(TH);
+            var shouldRemoveBinding = false;
 
-            if (_subscriptions.ContainsKey(eventName))
+            lock (_subscriptionLock)
             {
-                _subscriptions[eventName].Remove(handlerType);
-                _handlerFactories.TryRemove($"{eventName}_{handlerType.Name}", out _);
-
-                if (_subscriptions[eventName].Count == 0)
+                if (_subscriptions.TryGetValue(eventName, out var handlers))
                 {
-                    _subscriptions.TryRemove(eventName, out _);
-                    RemoveBinding(eventName);
-                }
+                    handlers.Remove(handlerType);
+                    _handlerFactories.TryRemove($"{eventName}_{handlerType.Name}", out _);
 
-                _logger.LogInformation($"事件处理器 {handlerType.Name} 取消订阅事件 {eventName}");
+                    if (handlers.Count == 0)
+                    {
+                        _subscriptions.TryRemove(eventName, out _);
+                        shouldRemoveBinding = !HasAnySubscriptionUnsafe(eventName);
+                    }
+
+                    _logger.LogInformation($"事件处理器 {handlerType.Name} 取消订阅事件 {eventName}");
+                }
+            }
+
+            if (shouldRemoveBinding)
+            {
+                RemoveBinding(eventName);
             }
         }
 
@@ -106,18 +123,27 @@ namespace SyZero.RabbitMQ
             where TH : IDynamicEventHandler
         {
             var handlerType = typeof(TH);
+            var shouldRemoveBinding = false;
 
-            if (_dynamicSubscriptions.ContainsKey(eventName))
+            lock (_subscriptionLock)
             {
-                _dynamicSubscriptions[eventName].Remove(handlerType);
-
-                if (_dynamicSubscriptions[eventName].Count == 0)
+                if (_dynamicSubscriptions.TryGetValue(eventName, out var handlers))
                 {
-                    _dynamicSubscriptions.TryRemove(eventName, out _);
-                    RemoveBinding(eventName);
-                }
+                    handlers.Remove(handlerType);
 
-                _logger.LogInformation($"动态事件处理器 {handlerType.Name} 取消订阅事件 {eventName}");
+                    if (handlers.Count == 0)
+                    {
+                        _dynamicSubscriptions.TryRemove(eventName, out _);
+                        shouldRemoveBinding = !HasAnySubscriptionUnsafe(eventName);
+                    }
+
+                    _logger.LogInformation($"动态事件处理器 {handlerType.Name} 取消订阅事件 {eventName}");
+                }
+            }
+
+            if (shouldRemoveBinding)
+            {
+                RemoveBinding(eventName);
             }
         }
 
@@ -130,7 +156,7 @@ namespace SyZero.RabbitMQ
         /// </summary>
         public void Publish(EventBase @event)
         {
-            PublishAsync(@event).GetAwaiter().GetResult();
+            RunSync(() => PublishAsync(@event));
         }
 
         /// <summary>
@@ -150,7 +176,7 @@ namespace SyZero.RabbitMQ
         /// </summary>
         public void Publish(string eventName, object eventData)
         {
-            PublishAsync(eventName, eventData).GetAwaiter().GetResult();
+            RunSync(() => PublishAsync(eventName, eventData));
         }
 
         /// <summary>
@@ -158,6 +184,9 @@ namespace SyZero.RabbitMQ
         /// </summary>
         public async Task PublishAsync(string eventName, object eventData)
         {
+            if (string.IsNullOrWhiteSpace(eventName))
+                throw new ArgumentException("Event name is required.", nameof(eventName));
+
             if (!_persistentConnection.IsConnected)
             {
                 _persistentConnection.TryConnect();
@@ -206,7 +235,7 @@ namespace SyZero.RabbitMQ
         /// </summary>
         public void PublishBatch(IEnumerable<EventBase> events)
         {
-            PublishBatchAsync(events).GetAwaiter().GetResult();
+            RunSync(() => PublishBatchAsync(events));
         }
 
         /// <summary>
@@ -214,7 +243,7 @@ namespace SyZero.RabbitMQ
         /// </summary>
         public async Task PublishBatchAsync(IEnumerable<EventBase> events)
         {
-            if (events == null || !events.Any())
+            if (events == null)
                 return;
 
             foreach (var @event in events)
@@ -232,9 +261,23 @@ namespace SyZero.RabbitMQ
         /// </summary>
         public void Clear()
         {
-            _subscriptions.Clear();
-            _dynamicSubscriptions.Clear();
-            _handlerFactories.Clear();
+            string[] eventNames;
+            lock (_subscriptionLock)
+            {
+                eventNames = _subscriptions.Keys
+                    .Concat(_dynamicSubscriptions.Keys)
+                    .Distinct()
+                    .ToArray();
+                _subscriptions.Clear();
+                _dynamicSubscriptions.Clear();
+                _handlerFactories.Clear();
+            }
+
+            foreach (var eventName in eventNames)
+            {
+                RemoveBinding(eventName);
+            }
+
             _logger.LogInformation("已清空所有订阅");
         }
 
@@ -252,7 +295,10 @@ namespace SyZero.RabbitMQ
         /// </summary>
         public bool IsSubscribed(string eventName)
         {
-            return _subscriptions.ContainsKey(eventName) || _dynamicSubscriptions.ContainsKey(eventName);
+            lock (_subscriptionLock)
+            {
+                return _subscriptions.ContainsKey(eventName) || _dynamicSubscriptions.ContainsKey(eventName);
+            }
         }
 
         /// <summary>
@@ -260,76 +306,90 @@ namespace SyZero.RabbitMQ
         /// </summary>
         public IEnumerable<string> GetSubscribedEvents()
         {
-            var subscribedEvents = new HashSet<string>();
-            
-            foreach (var eventName in _subscriptions.Keys)
+            lock (_subscriptionLock)
             {
-                subscribedEvents.Add(eventName);
+                var subscribedEvents = new HashSet<string>();
+                foreach (var eventName in _subscriptions.Keys)
+                {
+                    subscribedEvents.Add(eventName);
+                }
+                foreach (var eventName in _dynamicSubscriptions.Keys)
+                {
+                    subscribedEvents.Add(eventName);
+                }
+                return subscribedEvents.ToArray();
             }
-            
-            foreach (var eventName in _dynamicSubscriptions.Keys)
-            {
-                subscribedEvents.Add(eventName);
-            }
-            
-            return subscribedEvents;
         }
 
         private void DoSubscribe(Type handlerType, string eventName, Func<object> handlerFactory)
         {
-            if (!_subscriptions.ContainsKey(eventName))
+            lock (_subscriptionLock)
             {
-                if (!_persistentConnection.IsConnected)
+                if (!_subscriptions.TryGetValue(eventName, out var handlers))
                 {
-                    _persistentConnection.TryConnect();
+                    if (!HasAnySubscriptionUnsafe(eventName))
+                    {
+                        if (!_persistentConnection.IsConnected)
+                        {
+                            _persistentConnection.TryConnect();
+                        }
+
+                        using var channel = _persistentConnection.CreateModel();
+                        channel.QueueBind(
+                            queue: _queueName,
+                            exchange: _options.ExchangeName,
+                            routingKey: eventName);
+                    }
+
+                    handlers = new List<Type>();
+                    _subscriptions[eventName] = handlers;
                 }
 
-                using var channel = _persistentConnection.CreateModel();
-                channel.QueueBind(
-                    queue: _queueName,
-                    exchange: _options.ExchangeName,
-                    routingKey: eventName);
+                if (handlers.Contains(handlerType))
+                {
+                    _logger.LogWarning($"事件处理器 {handlerType.Name} 已订阅事件 {eventName}");
+                    return;
+                }
 
-                _subscriptions[eventName] = new List<Type>();
+                handlers.Add(handlerType);
+                _handlerFactories[$"{eventName}_{handlerType.Name}"] = handlerFactory;
             }
-
-            if (_subscriptions[eventName].Contains(handlerType))
-            {
-                _logger.LogWarning($"事件处理器 {handlerType.Name} 已订阅事件 {eventName}");
-                return;
-            }
-
-            _subscriptions[eventName].Add(handlerType);
-            _handlerFactories[$"{eventName}_{handlerType.Name}"] = handlerFactory;
 
             _logger.LogInformation($"事件处理器 {handlerType.Name} 订阅事件 {eventName}");
         }
 
         private void DoSubscribeDynamic(Type handlerType, string eventName)
         {
-            if (!_dynamicSubscriptions.ContainsKey(eventName))
+            lock (_subscriptionLock)
             {
-                if (!_persistentConnection.IsConnected)
+                if (!_dynamicSubscriptions.TryGetValue(eventName, out var handlers))
                 {
-                    _persistentConnection.TryConnect();
+                    if (!HasAnySubscriptionUnsafe(eventName))
+                    {
+                        if (!_persistentConnection.IsConnected)
+                        {
+                            _persistentConnection.TryConnect();
+                        }
+
+                        using var channel = _persistentConnection.CreateModel();
+                        channel.QueueBind(
+                            queue: _queueName,
+                            exchange: _options.ExchangeName,
+                            routingKey: eventName);
+                    }
+
+                    handlers = new List<Type>();
+                    _dynamicSubscriptions[eventName] = handlers;
                 }
 
-                using var channel = _persistentConnection.CreateModel();
-                channel.QueueBind(
-                    queue: _queueName,
-                    exchange: _options.ExchangeName,
-                    routingKey: eventName);
+                if (handlers.Contains(handlerType))
+                {
+                    _logger.LogWarning($"动态事件处理器 {handlerType.Name} 已订阅事件 {eventName}");
+                    return;
+                }
 
-                _dynamicSubscriptions[eventName] = new List<Type>();
+                handlers.Add(handlerType);
             }
-
-            if (_dynamicSubscriptions[eventName].Contains(handlerType))
-            {
-                _logger.LogWarning($"动态事件处理器 {handlerType.Name} 已订阅事件 {eventName}");
-                return;
-            }
-
-            _dynamicSubscriptions[eventName].Add(handlerType);
 
             _logger.LogInformation($"动态事件处理器 {handlerType.Name} 订阅事件 {eventName}");
         }
@@ -341,13 +401,20 @@ namespace SyZero.RabbitMQ
                 _persistentConnection.TryConnect();
             }
 
-            using var channel = _persistentConnection.CreateModel();
-            channel.QueueUnbind(
-                queue: _queueName,
-                exchange: _options.ExchangeName,
-                routingKey: eventName);
+            try
+            {
+                using var channel = _persistentConnection.CreateModel();
+                channel.QueueUnbind(
+                    queue: _queueName,
+                    exchange: _options.ExchangeName,
+                    routingKey: eventName);
 
-            _logger.LogInformation($"已移除事件 {eventName} 的绑定");
+                _logger.LogInformation($"已移除事件 {eventName} 的绑定");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"移除事件 {eventName} 绑定失败");
+            }
         }
 
         private IModel CreateConsumerChannel()
@@ -396,29 +463,41 @@ namespace SyZero.RabbitMQ
                 durable: _options.QueueDurable,
                 exclusive: false,
                 autoDelete: _options.QueueAutoDelete,
-                arguments: queueArgs);
+                arguments: queueArgs.Count == 0 ? null : queueArgs);
 
             // 设置预取数量
             channel.BasicQos(0, _options.PrefetchCount, false);
 
-            channel.CallbackException += (sender, ea) =>
-            {
-                _logger.LogWarning(ea.Exception, "重新创建 RabbitMQ 消费者通道");
-                _consumerChannel?.Dispose();
-                _consumerChannel = CreateConsumerChannel();
-                StartBasicConsume();
-            };
+            channel.CallbackException += OnConsumerChannelCallbackException;
 
             return channel;
         }
 
         private void StartBasicConsume()
         {
-            _logger.LogInformation("开始 RabbitMQ 基本消费");
-
-            if (_consumerChannel != null)
+            lock (_consumerLock)
             {
-                var consumer = new AsyncEventingBasicConsumer(_consumerChannel);
+                if (_consumerChannel == null)
+                {
+                    _logger.LogError("StartBasicConsume 无法调用，_consumerChannel 为 null");
+                    return;
+                }
+
+                if (!_consumerChannel.IsOpen)
+                {
+                    _logger.LogWarning("StartBasicConsume 无法调用，_consumerChannel 已关闭");
+                    return;
+                }
+
+                if (!string.IsNullOrWhiteSpace(_consumerTag))
+                {
+                    return;
+                }
+
+                _logger.LogInformation("开始 RabbitMQ 基本消费");
+
+                var consumerChannel = _consumerChannel;
+                var consumer = new AsyncEventingBasicConsumer(consumerChannel);
 
                 consumer.Received += async (model, ea) =>
                 {
@@ -428,25 +507,26 @@ namespace SyZero.RabbitMQ
                     try
                     {
                         await ProcessEvent(eventName, message);
-                        _consumerChannel.BasicAck(ea.DeliveryTag, multiple: false);
+                        if (!_options.AutoAck)
+                        {
+                            consumerChannel.BasicAck(ea.DeliveryTag, multiple: false);
+                        }
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, $"处理事件 {eventName} 时发生错误: {message}");
-                        
-                        // 拒绝消息并重新入队
-                        _consumerChannel.BasicNack(ea.DeliveryTag, multiple: false, requeue: false);
+
+                        if (!_options.AutoAck)
+                        {
+                            consumerChannel.BasicNack(ea.DeliveryTag, multiple: false, requeue: false);
+                        }
                     }
                 };
 
-                _consumerChannel.BasicConsume(
+                _consumerTag = consumerChannel.BasicConsume(
                     queue: _queueName,
                     autoAck: _options.AutoAck,
                     consumer: consumer);
-            }
-            else
-            {
-                _logger.LogError("StartBasicConsume 无法调用，_consumerChannel 为 null");
             }
         }
 
@@ -455,9 +535,9 @@ namespace SyZero.RabbitMQ
             _logger.LogInformation($"处理事件: {eventName}");
 
             // 处理普通订阅
-            if (_subscriptions.ContainsKey(eventName))
+            var handlerTypes = GetTypedHandlers(eventName);
+            if (handlerTypes.Count > 0)
             {
-                var handlerTypes = _subscriptions[eventName];
                 foreach (var handlerType in handlerTypes)
                 {
                     var factoryKey = $"{eventName}_{handlerType.Name}";
@@ -470,26 +550,30 @@ namespace SyZero.RabbitMQ
                             continue;
                         }
 
-                        var eventType = _subscriptions[eventName].FirstOrDefault()?.BaseType?.GetGenericArguments()?.FirstOrDefault();
+                        var eventType = GetHandlerEventType(handlerType);
                         if (eventType != null)
                         {
                             var integrationEvent = JsonSerializer.Deserialize(message, eventType);
                             var concreteType = typeof(IEventHandler<>).MakeGenericType(eventType);
-                            await (Task)concreteType.GetMethod("HandleAsync").Invoke(handler, new object[] { integrationEvent });
+                            if (concreteType.GetMethod("HandleAsync")?.Invoke(handler, new[] { integrationEvent }) is Task taskResult)
+                            {
+                                await taskResult;
+                            }
                         }
                     }
                 }
             }
 
             // 处理动态订阅
-            if (_dynamicSubscriptions.ContainsKey(eventName))
+            var dynamicHandlerTypes = GetDynamicHandlers(eventName);
+            if (dynamicHandlerTypes.Count > 0)
             {
-                var handlerTypes = _dynamicSubscriptions[eventName];
                 using var scope = _serviceProvider.CreateScope();
                 
-                foreach (var handlerType in handlerTypes)
+                foreach (var handlerType in dynamicHandlerTypes)
                 {
-                    var handler = scope.ServiceProvider.GetService(handlerType) as IDynamicEventHandler;
+                    var handler = scope.ServiceProvider.GetService(handlerType) as IDynamicEventHandler
+                        ?? Activator.CreateInstance(handlerType) as IDynamicEventHandler;
                     if (handler == null)
                     {
                         _logger.LogWarning($"无法创建动态处理器实例: {handlerType.Name}");
@@ -507,6 +591,38 @@ namespace SyZero.RabbitMQ
             return typeof(T).Name;
         }
 
+        private List<Type> GetTypedHandlers(string eventName)
+        {
+            lock (_subscriptionLock)
+            {
+                return _subscriptions.TryGetValue(eventName, out var handlers)
+                    ? handlers.ToList()
+                    : new List<Type>();
+            }
+        }
+
+        private List<Type> GetDynamicHandlers(string eventName)
+        {
+            lock (_subscriptionLock)
+            {
+                return _dynamicSubscriptions.TryGetValue(eventName, out var handlers)
+                    ? handlers.ToList()
+                    : new List<Type>();
+            }
+        }
+
+        private static Type GetHandlerEventType(Type handlerType)
+        {
+            return handlerType.GetInterfaces()
+                .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEventHandler<>))
+                ?.GetGenericArguments()[0];
+        }
+
+        private bool HasAnySubscriptionUnsafe(string eventName)
+        {
+            return _subscriptions.ContainsKey(eventName) || _dynamicSubscriptions.ContainsKey(eventName);
+        }
+
         private Polly.IAsyncPolicy CreateRetryPolicy()
         {
             return Polly.Policy.Handle<Exception>()
@@ -517,6 +633,11 @@ namespace SyZero.RabbitMQ
                     {
                         _logger.LogWarning(ex, $"RabbitMQ 发布失败，重试 {retry}/{_options.RetryCount}，等待 {time.TotalMilliseconds}ms");
                     });
+        }
+
+        private static void RunSync(Func<Task> taskFactory)
+        {
+            taskFactory().ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
         #endregion
@@ -533,12 +654,68 @@ namespace SyZero.RabbitMQ
 
             _disposed = true;
 
-            _consumerChannel?.Dispose();
+            lock (_consumerLock)
+            {
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(_consumerTag) && _consumerChannel?.IsOpen == true)
+                    {
+                        _consumerChannel.BasicCancel(_consumerTag);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "取消 RabbitMQ 消费者失败");
+                }
+
+                _consumerTag = null;
+                _consumerChannel?.Dispose();
+                _consumerChannel = null;
+            }
+
+            DeleteQueueIfOwned();
             _subscriptions?.Clear();
             _dynamicSubscriptions?.Clear();
             _handlerFactories?.Clear();
 
             _logger.LogInformation("RabbitMQ EventBus 已释放");
+        }
+
+        private void OnConsumerChannelCallbackException(object sender, CallbackExceptionEventArgs ea)
+        {
+            _logger.LogWarning(ea.Exception, "重新创建 RabbitMQ 消费者通道");
+
+            lock (_consumerLock)
+            {
+                _consumerTag = null;
+                _consumerChannel?.Dispose();
+                _consumerChannel = CreateConsumerChannel();
+            }
+
+            StartBasicConsume();
+        }
+
+        private void DeleteQueueIfOwned()
+        {
+            if (!_deleteQueueOnDispose)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!_persistentConnection.IsConnected)
+                {
+                    _persistentConnection.TryConnect();
+                }
+
+                using var channel = _persistentConnection.CreateModel();
+                channel.QueueDelete(_queueName, ifUnused: false, ifEmpty: false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"删除 RabbitMQ 临时队列 {_queueName} 失败");
+            }
         }
 
         #endregion

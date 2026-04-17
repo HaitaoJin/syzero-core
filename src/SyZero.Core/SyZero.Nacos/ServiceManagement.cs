@@ -1,12 +1,10 @@
-﻿using Nacos.V2;
+using Nacos.V2;
 using Nacos.V2.Naming.Dtos;
 using Nacos.V2.Naming.Event;
 using System;
-using System.Collections.Generic;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
-using System.Net.Http;
-using System.Text;
 using System.Threading.Tasks;
 using SyZero.Cache;
 using SyZero.Runtime.Security;
@@ -20,34 +18,34 @@ namespace SyZero.Nacos
         private readonly INacosNamingService _nacosNamingService;
         private readonly ICache _cache;
         private readonly ConcurrentDictionary<string, ServiceChangeListener> _listeners = new ConcurrentDictionary<string, ServiceChangeListener>();
-        private readonly Random _random = new Random();
+        private readonly ConcurrentDictionary<string, RegisteredInstanceLocator> _serviceLocators = new ConcurrentDictionary<string, RegisteredInstanceLocator>();
+        private const string CachePrefix = "Nacos:";
 
         public ServiceManagement(INacosNamingService nacosNamingService, ICache cache)
         {
-            this._nacosNamingService = nacosNamingService;
-            this._cache = cache;
+            _nacosNamingService = nacosNamingService;
+            _cache = cache;
         }
 
         #region 服务查询
 
         public async Task<List<ServiceInfo>> GetService(string serviceName)
         {
-            if (_cache.Exist($"Nacos:{serviceName}"))
+            var cacheKey = GetCacheKey(serviceName);
+            if (_cache.Exist(cacheKey))
             {
-                return _cache.Get<List<ServiceInfo>>($"Nacos:{serviceName}");
+                return CloneServices(_cache.Get<List<ServiceInfo>>(cacheKey));
             }
-            else
+
+            var services = await _nacosNamingService.GetAllInstances(serviceName);
+            if (services == null || services.Count == 0)
             {
-                // 这里需要知道被调用方的服务名
-                var services = await _nacosNamingService.SelectInstances(serviceName, true);
-                if (services.Count == 0)
-                {
-                    throw new Exception($"SyZero.Nacos:未找到{serviceName}服务!");
-                }
-                var serviceInfos = services.Select(service => MapToServiceInfo(service)).ToList();
-                _cache.Set($"Nacos:{serviceName}", serviceInfos, 30);
-                return serviceInfos;
+                throw new Exception($"SyZero.Nacos:未找到{serviceName}服务!");
             }
+
+            var serviceInfos = TrackAndCloneServices(services.Select(MapToServiceInfo).ToList());
+            _cache.Set(cacheKey, serviceInfos, 30);
+            return CloneServices(serviceInfos);
         }
 
         public async Task<List<ServiceInfo>> GetHealthyServices(string serviceName)
@@ -57,19 +55,19 @@ namespace SyZero.Nacos
             {
                 return new List<ServiceInfo>();
             }
-            return services.Select(service => MapToServiceInfo(service)).ToList();
+
+            return TrackAndCloneServices(services.Select(MapToServiceInfo).ToList());
         }
 
         public async Task<ServiceInfo> GetServiceInstance(string serviceName)
         {
-            var services = await GetHealthyServices(serviceName);
-            if (services == null || services.Count == 0)
+            var service = await _nacosNamingService.SelectOneHealthyInstance(serviceName);
+            if (service == null)
             {
                 throw new Exception($"SyZero.Nacos:未找到可用的{serviceName}服务实例!");
             }
-            // 简单随机负载均衡
-            var index = _random.Next(services.Count);
-            return services[index];
+
+            return TrackAndClone(MapToServiceInfo(service));
         }
 
         public async Task<List<string>> GetAllServices()
@@ -84,7 +82,9 @@ namespace SyZero.Nacos
 
         public async Task RegisterService(ServiceInfo serviceInfo)
         {
-            var metadata = serviceInfo.Metadata ?? new Dictionary<string, string>();
+            var metadata = serviceInfo.Metadata != null
+                ? new Dictionary<string, string>(serviceInfo.Metadata)
+                : new Dictionary<string, string>();
             metadata["Protocol"] = serviceInfo.ServiceProtocol.ToString();
             metadata["secure"] = serviceInfo.ServiceProtocol == ProtocolType.HTTPS ? "true" : "false";
             if (!string.IsNullOrEmpty(serviceInfo.Version))
@@ -111,30 +111,73 @@ namespace SyZero.Nacos
                 Port = serviceInfo.ServicePort,
                 Healthy = serviceInfo.IsHealthy,
                 Enabled = serviceInfo.Enabled,
-                Weight = serviceInfo.Weight,
+                Weight = serviceInfo.Weight > 0 ? serviceInfo.Weight : 1.0,
                 Metadata = metadata,
                 ClusterName = serviceInfo.Group
             };
             await _nacosNamingService.RegisterInstance(serviceInfo.ServiceName, instance);
+
+            TrackService(new ServiceInfo
+            {
+                ServiceID = serviceInfo.ServiceID,
+                ServiceName = serviceInfo.ServiceName,
+                ServiceAddress = serviceInfo.ServiceAddress,
+                ServicePort = serviceInfo.ServicePort,
+                ServiceProtocol = serviceInfo.ServiceProtocol,
+                Version = serviceInfo.Version,
+                Group = serviceInfo.Group,
+                Tags = serviceInfo.Tags != null ? new List<string>(serviceInfo.Tags) : new List<string>(),
+                Metadata = metadata,
+                IsHealthy = serviceInfo.IsHealthy,
+                Enabled = serviceInfo.Enabled,
+                Weight = serviceInfo.Weight > 0 ? serviceInfo.Weight : 1.0,
+                RegisterTime = serviceInfo.RegisterTime != default ? serviceInfo.RegisterTime : DateTime.UtcNow,
+                LastHeartbeat = serviceInfo.LastHeartbeat,
+                HealthCheckUrl = serviceInfo.HealthCheckUrl,
+                HealthCheckIntervalSeconds = serviceInfo.HealthCheckIntervalSeconds,
+                HealthCheckTimeoutSeconds = serviceInfo.HealthCheckTimeoutSeconds,
+                Region = serviceInfo.Region,
+                Zone = serviceInfo.Zone
+            });
+            InvalidateCache(serviceInfo.ServiceName);
         }
 
         public async Task DeregisterService(string serviceId)
         {
-            // Nacos需要通过服务名和实例信息来注销
-            // 由于只有serviceId，需要先查询服务信息
-            // 这里假设serviceId格式为: serviceName#ip#port
-            var parts = serviceId.Split('#');
-            if (parts.Length >= 3)
+            if (string.IsNullOrWhiteSpace(serviceId))
             {
-                var serviceName = parts[0];
-                var ip = parts[1];
-                var port = int.Parse(parts[2]);
+                throw new ArgumentException("serviceId不能为空。", nameof(serviceId));
+            }
+
+            if (TryParseCompositeServiceId(serviceId, out var serviceName, out var ip, out var port))
+            {
                 await _nacosNamingService.DeregisterInstance(serviceName, ip, port);
+                RemoveTrackedService(serviceId, serviceName);
+                return;
             }
-            else
+
+            if (_serviceLocators.TryGetValue(serviceId, out var locator))
             {
-                throw new ArgumentException($"无效的serviceId格式: {serviceId}，期望格式为: serviceName#ip#port");
+                await _nacosNamingService.DeregisterInstance(locator.ServiceName, new Instance
+                {
+                    InstanceId = serviceId,
+                    ServiceName = locator.ServiceName,
+                    Ip = locator.Ip,
+                    Port = locator.Port
+                });
+                RemoveTrackedService(serviceId, locator.ServiceName);
+                return;
             }
+
+            var resolved = await FindRegisteredInstance(serviceId);
+            if (resolved != null)
+            {
+                await _nacosNamingService.DeregisterInstance(resolved.ServiceName, resolved.Instance);
+                RemoveTrackedService(serviceId, resolved.ServiceName);
+                return;
+            }
+
+            throw new ArgumentException($"无法根据serviceId找到对应的Nacos实例: {serviceId}", nameof(serviceId));
         }
 
         #endregion
@@ -144,7 +187,7 @@ namespace SyZero.Nacos
         public async Task<bool> IsServiceHealthy(string serviceName)
         {
             var healthyServices = await GetHealthyServices(serviceName);
-            return healthyServices != null && healthyServices.Count > 0;
+            return healthyServices.Count > 0;
         }
 
         #endregion
@@ -153,7 +196,18 @@ namespace SyZero.Nacos
 
         public async Task Subscribe(string serviceName, Action<List<ServiceInfo>> callback)
         {
-            var listener = new ServiceChangeListener(callback);
+            if (_listeners.TryRemove(serviceName, out var existingListener))
+            {
+                await _nacosNamingService.Unsubscribe(serviceName, existingListener);
+            }
+
+            var listener = new ServiceChangeListener(services =>
+            {
+                var trackedServices = TrackAndCloneServices(services);
+                InvalidateCache(serviceName);
+                callback?.Invoke(trackedServices);
+            });
+
             _listeners[serviceName] = listener;
             await _nacosNamingService.Subscribe(serviceName, listener);
         }
@@ -172,16 +226,29 @@ namespace SyZero.Nacos
 
         private static ServiceInfo MapToServiceInfo(Instance instance)
         {
-            var protocol = instance.Metadata.TryGetValue("secure", out var secure) && secure == "true" 
-                ? ProtocolType.HTTPS : ProtocolType.HTTP;
-            instance.Metadata.TryGetValue("Version", out var version);
-            instance.Metadata.TryGetValue("Group", out var group);
-            instance.Metadata.TryGetValue("Region", out var region);
-            instance.Metadata.TryGetValue("Zone", out var zone);
-            instance.Metadata.TryGetValue("HealthCheckUrl", out var healthCheckUrl);
-            int.TryParse(instance.Metadata.TryGetValue("HealthCheckIntervalSeconds", out var intervalStr) ? intervalStr : "10", out var healthCheckInterval);
-            int.TryParse(instance.Metadata.TryGetValue("HealthCheckTimeoutSeconds", out var timeoutStr) ? timeoutStr : "5", out var healthCheckTimeout);
-            DateTime.TryParse(instance.Metadata.TryGetValue("RegisterTime", out var registerTimeStr) ? registerTimeStr : null, out var registerTime);
+            var metadata = instance.Metadata != null
+                ? new Dictionary<string, string>(instance.Metadata)
+                : new Dictionary<string, string>();
+            var protocol = ProtocolType.HTTP;
+            if (metadata.TryGetValue("Protocol", out var protocolValue) &&
+                Enum.TryParse(protocolValue, true, out ProtocolType parsedProtocol))
+            {
+                protocol = parsedProtocol;
+            }
+            else if (metadata.TryGetValue("secure", out var secure) &&
+                     string.Equals(secure, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                protocol = ProtocolType.HTTPS;
+            }
+
+            metadata.TryGetValue("Version", out var version);
+            metadata.TryGetValue("Group", out var group);
+            metadata.TryGetValue("Region", out var region);
+            metadata.TryGetValue("Zone", out var zone);
+            metadata.TryGetValue("HealthCheckUrl", out var healthCheckUrl);
+            int.TryParse(metadata.TryGetValue("HealthCheckIntervalSeconds", out var intervalStr) ? intervalStr : "10", out var healthCheckInterval);
+            int.TryParse(metadata.TryGetValue("HealthCheckTimeoutSeconds", out var timeoutStr) ? timeoutStr : "5", out var healthCheckTimeout);
+            DateTime.TryParse(metadata.TryGetValue("RegisterTime", out var registerTimeStr) ? registerTimeStr : null, out var registerTime);
 
             return new ServiceInfo
             {
@@ -192,16 +259,125 @@ namespace SyZero.Nacos
                 ServiceProtocol = protocol,
                 Version = version,
                 Group = group ?? instance.ClusterName,
-                Metadata = instance.Metadata != null ? new Dictionary<string, string>(instance.Metadata) : new Dictionary<string, string>(),
+                Metadata = metadata,
                 IsHealthy = instance.Healthy,
                 Enabled = instance.Enabled,
-                Weight = instance.Weight,
-                RegisterTime = registerTime,
+                Weight = instance.Weight > 0 ? instance.Weight : 1.0,
+                RegisterTime = registerTime != default ? registerTime : DateTime.UtcNow,
                 Region = region,
                 Zone = zone,
                 HealthCheckUrl = healthCheckUrl,
-                HealthCheckIntervalSeconds = healthCheckInterval,
-                HealthCheckTimeoutSeconds = healthCheckTimeout
+                HealthCheckIntervalSeconds = healthCheckInterval > 0 ? healthCheckInterval : 10,
+                HealthCheckTimeoutSeconds = healthCheckTimeout > 0 ? healthCheckTimeout : 5
+            };
+        }
+
+        private static string GetCacheKey(string serviceName)
+        {
+            return $"{CachePrefix}{serviceName}";
+        }
+
+        private void InvalidateCache(string serviceName)
+        {
+            _cache.Remove(GetCacheKey(serviceName));
+        }
+
+        private List<ServiceInfo> TrackAndCloneServices(List<ServiceInfo> services)
+        {
+            foreach (var service in services)
+            {
+                TrackService(service);
+            }
+
+            return CloneServices(services);
+        }
+
+        private ServiceInfo TrackAndClone(ServiceInfo service)
+        {
+            TrackService(service);
+            return CloneService(service);
+        }
+
+        private void TrackService(ServiceInfo service)
+        {
+            if (string.IsNullOrWhiteSpace(service.ServiceID) ||
+                string.IsNullOrWhiteSpace(service.ServiceName) ||
+                string.IsNullOrWhiteSpace(service.ServiceAddress) ||
+                service.ServicePort <= 0)
+            {
+                return;
+            }
+
+            _serviceLocators[service.ServiceID] = new RegisteredInstanceLocator(service.ServiceName, service.ServiceAddress, service.ServicePort);
+        }
+
+        private void RemoveTrackedService(string serviceId, string serviceName)
+        {
+            _serviceLocators.TryRemove(serviceId, out _);
+            InvalidateCache(serviceName);
+        }
+
+        private async Task<ResolvedInstance> FindRegisteredInstance(string serviceId)
+        {
+            var serviceNames = await GetAllServices();
+            foreach (var serviceName in serviceNames)
+            {
+                var instances = await _nacosNamingService.GetAllInstances(serviceName);
+                var instance = instances?.FirstOrDefault(item => string.Equals(item.InstanceId, serviceId, StringComparison.Ordinal));
+                if (instance != null)
+                {
+                    return new ResolvedInstance(serviceName, instance);
+                }
+            }
+
+            return null;
+        }
+
+        private static bool TryParseCompositeServiceId(string serviceId, out string serviceName, out string ip, out int port)
+        {
+            serviceName = string.Empty;
+            ip = string.Empty;
+            port = 0;
+
+            var parts = serviceId.Split('#', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 3 || !int.TryParse(parts[2], out port))
+            {
+                return false;
+            }
+
+            serviceName = parts[0];
+            ip = parts[1];
+            return !string.IsNullOrWhiteSpace(serviceName) && !string.IsNullOrWhiteSpace(ip);
+        }
+
+        private static List<ServiceInfo> CloneServices(IEnumerable<ServiceInfo> services)
+        {
+            return services?.Select(CloneService).ToList() ?? new List<ServiceInfo>();
+        }
+
+        private static ServiceInfo CloneService(ServiceInfo service)
+        {
+            return new ServiceInfo
+            {
+                ServiceID = service.ServiceID,
+                ServiceName = service.ServiceName,
+                ServiceAddress = service.ServiceAddress,
+                ServicePort = service.ServicePort,
+                ServiceProtocol = service.ServiceProtocol,
+                Version = service.Version,
+                Group = service.Group,
+                Tags = service.Tags != null ? new List<string>(service.Tags) : new List<string>(),
+                Metadata = service.Metadata != null ? new Dictionary<string, string>(service.Metadata) : new Dictionary<string, string>(),
+                IsHealthy = service.IsHealthy,
+                Enabled = service.Enabled,
+                Weight = service.Weight,
+                RegisterTime = service.RegisterTime,
+                LastHeartbeat = service.LastHeartbeat,
+                HealthCheckUrl = service.HealthCheckUrl,
+                HealthCheckIntervalSeconds = service.HealthCheckIntervalSeconds,
+                HealthCheckTimeoutSeconds = service.HealthCheckTimeoutSeconds,
+                Region = service.Region,
+                Zone = service.Zone
             };
         }
 
@@ -226,8 +402,13 @@ namespace SyZero.Nacos
                     var services = changeEvent.Hosts?.Select(instance => MapToServiceInfo(instance)).ToList() ?? new List<ServiceInfo>();
                     _callback?.Invoke(services);
                 }
+
                 return Task.CompletedTask;
             }
         }
+
+        private sealed record RegisteredInstanceLocator(string ServiceName, string Ip, int Port);
+
+        private sealed record ResolvedInstance(string ServiceName, Instance Instance);
     }
 }

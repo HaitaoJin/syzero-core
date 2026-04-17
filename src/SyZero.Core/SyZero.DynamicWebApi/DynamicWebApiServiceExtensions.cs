@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.ApplicationParts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using System;
+using System.Linq;
 
 namespace SyZero.DynamicWebApi
 {
@@ -21,6 +22,11 @@ namespace SyZero.DynamicWebApi
         /// <exception cref="InvalidOperationException">在 AddMvc 之前调用时抛出</exception>
         public static IServiceCollection AddDynamicWebApi(this IServiceCollection services, DynamicWebApiOptions options)
         {
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+
             if (options == null)
             {
                 throw new ArgumentNullException(nameof(options));
@@ -38,11 +44,19 @@ namespace SyZero.DynamicWebApi
             // 注册程序集
             foreach (var assembly in ReflectionHelper.GetAssemblies())
             {
+                if (partManager.ApplicationParts.OfType<AssemblyPart>().Any(part => part.Assembly == assembly))
+                {
+                    continue;
+                }
+
                 partManager.ApplicationParts.Add(new AssemblyPart(assembly));
             }
 
             // 注册控制器特性提供程序
-            partManager.FeatureProviders.Add(new DynamicWebApiControllerFeatureProvider());
+            if (!partManager.FeatureProviders.OfType<DynamicWebApiControllerFeatureProvider>().Any())
+            {
+                partManager.FeatureProviders.Add(new DynamicWebApiControllerFeatureProvider());
+            }
 
             // 注册 MVC 约定
             services.Configure<MvcOptions>(mvcOptions =>
@@ -62,9 +76,9 @@ namespace SyZero.DynamicWebApi
         /// <returns>服务集合</returns>
         public static IServiceCollection AddDynamicWebApi(this IServiceCollection services, IConfiguration configuration = null, string sectionName = DynamicWebApiOptions.SectionName)
         {
-            var config = configuration ?? AppConfig.Configuration;
             var options = new DynamicWebApiOptions();
-            config.GetSection(sectionName).Bind(options);
+            var config = configuration ?? AppConfig.Configuration;
+            config?.GetSection(sectionName).Bind(options);
             return AddDynamicWebApi(services, options);
         }
 
@@ -78,9 +92,9 @@ namespace SyZero.DynamicWebApi
         /// <returns>服务集合</returns>
         public static IServiceCollection AddDynamicWebApi(this IServiceCollection services, Action<DynamicWebApiOptions> optionsAction, IConfiguration configuration = null, string sectionName = DynamicWebApiOptions.SectionName)
         {
-            var config = configuration ?? AppConfig.Configuration;
             var options = new DynamicWebApiOptions();
-            config.GetSection(sectionName).Bind(options);
+            var config = configuration ?? AppConfig.Configuration;
+            config?.GetSection(sectionName).Bind(options);
             optionsAction?.Invoke(options);
             return AddDynamicWebApi(services, options);
         }

@@ -4,14 +4,6 @@
         <name>SyZero.SqlSugar</name>
     </assembly>
     <members>
-        <member name="M:SyZero.SqlSugar.DbContext.SyZeroDbContext.WriteLog(System.String,SqlSugar.SugarParameter[],System.Double)">
-            <summary>
-            打印执行日志
-            </summary>
-            <param name="sql"></param>
-            <param name="sugarParameters"></param>
-            <param name="sqlExecutionTime"></param>
-        </member>
         <member name="T:SyZero.SqlSugar.SqlSugarTransactionScope">
             <summary>
             SqlSugar 事务作用域
@@ -21,23 +13,16 @@
             <summary>
             注册SqlSugar
             </summary>
-            <typeparam name="TContext"></typeparam>
-            <param name="builder"></param>
-            <returns></returns>
         </member>
         <member name="M:SyZero.SyZeroSqlSugarExtension.AddSyZeroSqlSugar(Microsoft.Extensions.DependencyInjection.IServiceCollection)">
             <summary>
             注册SqlSugar（使用默认的SyZeroDbContext）
             </summary>
-            <param name="services">服务集合</param>
-            <returns>服务集合</returns>
         </member>
         <member name="M:SyZero.SyZeroSqlSugarExtension.InitTables(Microsoft.Extensions.Hosting.IHost)">
             <summary>
             初始化表
             </summary>
-            <param name="app"></param>
-            <returns></returns>
         </member>
     </members>
 </doc>

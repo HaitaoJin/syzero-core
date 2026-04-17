@@ -25,7 +25,7 @@ namespace SyZero.Service.DBServiceManagement
         private readonly ICache _cache;
         private readonly DBServiceManagementOptions _options;
         private readonly ConcurrentDictionary<string, Action<List<ServiceInfo>>> _subscriptions = new ConcurrentDictionary<string, Action<List<ServiceInfo>>>();
-        private readonly Random _random = new Random();
+        private static readonly ThreadLocal<Random> RandomProvider = new ThreadLocal<Random>(() => new Random(Guid.NewGuid().GetHashCode()));
         private readonly HttpClient _httpClient;
         private readonly string _instanceId;
         private Timer _healthCheckTimer;
@@ -64,11 +64,11 @@ namespace SyZero.Service.DBServiceManagement
             // 如果启用 Leader 选举，先尝试获取 Leader
             if (_options.EnableLeaderElection && _leaderRepository != null)
             {
-                TryAcquireLeadershipAsync().ConfigureAwait(false);
+                RunBackgroundTask(TryAcquireLeadershipAsync, "初始化 Leader 选举");
 
                 // 启动 Leader 续期定时器
                 _leaderRenewTimer = new Timer(
-                    _ => TryAcquireLeadershipAsync().ConfigureAwait(false),
+                    _ => RunBackgroundTask(TryAcquireLeadershipAsync, "Leader 续期"),
                     null,
                     TimeSpan.FromSeconds(_options.LeaderLockRenewIntervalSeconds),
                     TimeSpan.FromSeconds(_options.LeaderLockRenewIntervalSeconds));
@@ -83,7 +83,7 @@ namespace SyZero.Service.DBServiceManagement
             if (_options.EnableHealthCheck)
             {
                 _healthCheckTimer = new Timer(
-                    _ => PerformHealthCheckAsync().ConfigureAwait(false),
+                    _ => RunBackgroundTask(PerformHealthCheckAsync, "健康检查"),
                     null,
                     TimeSpan.FromSeconds(_options.HealthCheckIntervalSeconds),
                     TimeSpan.FromSeconds(_options.HealthCheckIntervalSeconds));
@@ -93,7 +93,7 @@ namespace SyZero.Service.DBServiceManagement
             if (_options.AutoCleanExpiredServices)
             {
                 _cleanupTimer = new Timer(
-                    _ => CleanExpiredServicesAsync().ConfigureAwait(false),
+                    _ => RunBackgroundTask(CleanExpiredServicesAsync, "清理过期服务"),
                     null,
                     TimeSpan.FromSeconds(_options.AutoCleanIntervalSeconds),
                     TimeSpan.FromSeconds(_options.AutoCleanIntervalSeconds));
@@ -233,15 +233,15 @@ namespace SyZero.Service.DBServiceManagement
             return await _repository.GetAllServiceNamesAsync();
         }
 
-        private ServiceInfo SelectByWeight(List<ServiceInfo> services)
+        private static ServiceInfo SelectByWeight(List<ServiceInfo> services)
         {
             var totalWeight = services.Sum(s => s.Weight);
             if (totalWeight <= 0)
             {
-                return services[_random.Next(services.Count)];
+                return services[GetRandom().Next(services.Count)];
             }
 
-            var randomWeight = _random.NextDouble() * totalWeight;
+            var randomWeight = GetRandom().NextDouble() * totalWeight;
             var currentWeight = 0.0;
             foreach (var service in services)
             {
@@ -277,7 +277,7 @@ namespace SyZero.Service.DBServiceManagement
             ClearServiceCache(serviceInfo.ServiceName);
             
             // 通知订阅者
-            NotifySubscribers(serviceInfo.ServiceName);
+            await NotifySubscribersAsync(serviceInfo.ServiceName);
         }
 
         public async Task DeregisterService(string serviceId)
@@ -291,7 +291,7 @@ namespace SyZero.Service.DBServiceManagement
                 ClearServiceCache(entity.ServiceName);
                 
                 // 通知订阅者
-                NotifySubscribers(entity.ServiceName);
+                await NotifySubscribersAsync(entity.ServiceName);
             }
         }
 
@@ -336,19 +336,12 @@ namespace SyZero.Service.DBServiceManagement
             return Task.CompletedTask;
         }
 
-        private async void NotifySubscribers(string serviceName)
+        private async Task NotifySubscribersAsync(string serviceName)
         {
             if (_subscriptions.TryGetValue(serviceName, out var callback))
             {
-                try
-                {
-                    var services = await GetHealthyServices(serviceName);
-                    callback?.Invoke(services);
-                }
-                catch
-                {
-                    // 忽略通知错误
-                }
+                var services = await GetHealthyServices(serviceName);
+                callback?.Invoke(services);
             }
         }
 
@@ -388,7 +381,7 @@ namespace SyZero.Service.DBServiceManagement
                 foreach (var serviceName in changedServices)
                 {
                     ClearServiceCache(serviceName);
-                    NotifySubscribers(serviceName);
+                    await NotifySubscribersAsync(serviceName);
                 }
             }
             catch
@@ -448,6 +441,26 @@ namespace SyZero.Service.DBServiceManagement
         {
             _cache.Remove($"DB:Service:{serviceName}");
             _cache.Remove($"DB:HealthyService:{serviceName}");
+        }
+
+        private void RunBackgroundTask(Func<Task> taskFactory, string operationName)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await taskFactory();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"SyZero.DB: {operationName}失败: {ex.Message}");
+                }
+            });
+        }
+
+        private static Random GetRandom()
+        {
+            return RandomProvider.Value ?? new Random(Guid.NewGuid().GetHashCode());
         }
 
         private ServiceInfo MapToServiceInfo(ServiceRegistryEntity entity)

@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AutoMapper" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Microsoft.Extensions.Logging" VersionOverride="9.0.6" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Moq" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SyZero.Core\SyZero.AutoMapper\SyZero.AutoMapper.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.AspNetCore\SyZero.AspNetCore.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.AspNetCore.SpaProxy\SyZero.AspNetCore.SpaProxy.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.ApiGateway\SyZero.ApiGateway.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.Consul\SyZero.Consul.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.DynamicWebApi\SyZero.DynamicWebApi.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.Feign\SyZero.Feign.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.Log4Net\SyZero.Log4Net.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.EntityFrameworkCore\SyZero.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.DynamicGrpc\SyZero.DynamicGrpc.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.MongoDB\SyZero.MongoDB.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.OpenTelemetry\SyZero.OpenTelemetry.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.Nacos\SyZero.Nacos.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.RabbitMQ\SyZero.RabbitMQ.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.Redis\SyZero.Redis.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.Swagger\SyZero.Swagger.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.SqlSugar\SyZero.SqlSugar.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero.Web.Common\SyZero.Web.Common.csproj" />
+    <ProjectReference Include="..\SyZero.Core\SyZero\SyZero.csproj" />
+  </ItemGroup>
+</Project>

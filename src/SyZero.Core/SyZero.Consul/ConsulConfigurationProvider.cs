@@ -19,23 +19,33 @@ namespace SyZero.Consul
             {
                 ChangeToken.OnChange(
                     () => this.configurationParser.Watch(this.source.ServiceKey, this.source.CancellationToken),
-                    async () =>
-                    {
-                        Console.WriteLine("--------- SyZero.Consul：检测到配置变更 => 开始重新加载配置");
-                        await this.configurationParser.GetConfig(true, source).ConfigureAwait(false);
-                        Thread.Sleep(source.ReloadDelay);
-                        this.Load();
-                        Console.WriteLine("--------- SyZero.Consul：检测到配置变更 => 完成");
-                        this.OnReload();
-                    });
+                    this.ReloadConfiguration);
             }
         }
 
         public override void Load()
         {
+            this.LoadCore(false);
+        }
+
+        private void ReloadConfiguration()
+        {
+            Console.WriteLine("--------- SyZero.Consul：检测到配置变更 => 开始重新加载配置");
+            this.LoadCore(true);
+            Console.WriteLine("--------- SyZero.Consul：检测到配置变更 => 完成");
+            this.OnReload();
+        }
+
+        private void LoadCore(bool reloading)
+        {
             try
             {
-                this.Data = this.configurationParser.GetConfig(false, this.source).ConfigureAwait(false).GetAwaiter().GetResult();
+                if (reloading && this.source.ReloadDelay > 0)
+                {
+                    Thread.Sleep(this.source.ReloadDelay);
+                }
+
+                this.Data = this.configurationParser.GetConfig(reloading, this.source).ConfigureAwait(false).GetAwaiter().GetResult();
             }
             catch (AggregateException aggregateException)
             {

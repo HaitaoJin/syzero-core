@@ -2,7 +2,7 @@
 chcp 936 >nul
 setlocal enabledelayedexpansion
 
-set "SolutionPath=..\src\SyZero.sln"
+set "SolutionPath=..\SyZero.slnx"
 set "Configuration=Release"
 
 cd /d "%~dp0"

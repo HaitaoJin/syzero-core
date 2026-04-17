@@ -1,8 +1,6 @@
-﻿using Microsoft.AspNetCore.Http;
-using Newtonsoft.Json.Linq;
+using Microsoft.AspNetCore.Http;
 using System;
-using System.Collections.Generic;
-using System.Text;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using SyZero.Runtime.Security;
@@ -16,29 +14,42 @@ namespace SyZero.AspNetCore.Middleware
     /// </summary>
     public class SyAuthMiddleware : IMiddleware
     {
-        public IToken _token;
+        private static readonly ClaimsPrincipal Anonymous = new ClaimsPrincipal(new ClaimsIdentity());
+        private readonly IToken _token;
 
         public SyAuthMiddleware(IToken token)
         {
-            this._token = token;
+            _token = token;
         }
+
         public async Task InvokeAsync(HttpContext context, RequestDelegate next)
         {
-            context.User = null;
-            if (context.Request.Headers.TryGetValue("Authorization", out var token) && token.ToString().StartsWith("Bearer "))
+            using (SyZeroUtil.BeginScope(context.RequestServices))
             {
-                var tokenString = token.ToString().Replace("Bearer ", string.Empty);
+                Thread.CurrentPrincipal = Anonymous;
+                context.User = Anonymous;
 
-                // 如果令牌有效，则将用户信息添加到上下文中
-                var claimsPrincipal = _token.GetPrincipal(tokenString);
-
-                if (claimsPrincipal != null)
+                if (context.Request.Headers.TryGetValue("Authorization", out var token)
+                    && token.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
                 {
-                    context.User = claimsPrincipal;
-                    SyZeroUtil.GetScopeService<ISySession>().Parse(claimsPrincipal);
+                    var tokenString = token.ToString().Substring("Bearer ".Length).Trim();
+
+                    if (!string.IsNullOrWhiteSpace(tokenString))
+                    {
+                        // 如果令牌有效，则将用户信息添加到上下文中
+                        var claimsPrincipal = _token.GetPrincipal(tokenString);
+
+                        if (claimsPrincipal != null)
+                        {
+                            Thread.CurrentPrincipal = claimsPrincipal;
+                            context.User = claimsPrincipal;
+                            SyZeroUtil.GetScopeService<ISySession>()?.Parse(claimsPrincipal);
+                        }
+                    }
                 }
+
+                await next.Invoke(context);
             }
-            await next.Invoke(context);
         }
     }
 }

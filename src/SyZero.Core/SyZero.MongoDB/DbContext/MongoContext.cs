@@ -12,9 +12,6 @@ namespace SyZero.MongoDB
         public MongoContext(IOptions<MongoOptions> options)
 
         {
-            var permissionSystem =
-                MongoCredential.CreateCredential(options.Value.DataBase, options.Value.UserName,
-                    options.Value.Password);
             var services = new List<MongoServerAddress>();
             foreach (var item in options.Value.Services)
             {
@@ -22,10 +19,16 @@ namespace SyZero.MongoDB
             }
             var settings = new MongoClientSettings
             {
-                Credentials = new[] { permissionSystem },
                 Servers = services
             };
 
+            if (!string.IsNullOrWhiteSpace(options.Value.UserName) || !string.IsNullOrWhiteSpace(options.Value.Password))
+            {
+                settings.Credentials = new[]
+                {
+                    MongoCredential.CreateCredential(options.Value.DataBase, options.Value.UserName ?? string.Empty, options.Value.Password ?? string.Empty)
+                };
+            }
 
             var _mongoClient = new MongoClient(settings);
             _db = _mongoClient.GetDatabase(options.Value.DataBase);

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -8,16 +8,7 @@ namespace SyZero.Web.Common
     {
         public string Decrypt(string Text, string sKey, EncryptType typecs)
         {
-            IEncrypt encrypt = null;
-            switch (typecs)
-            {
-                case EncryptType.DES:
-                    encrypt = new DESEncrypt();
-                    break;
-                case EncryptType.AES:
-                    encrypt = new AESEncrypt();
-                    break;
-            }
+            var encrypt = CreateEncryptor(typecs);
             return encrypt.Decrypt(Text, sKey);
         }
 
@@ -32,16 +23,7 @@ namespace SyZero.Web.Common
 
         public string Encrypt(string Text, string sKey, EncryptType typecs)
         {
-            IEncrypt encrypt = null;
-            switch (typecs)
-            {
-                case EncryptType.DES:
-                    encrypt = new DESEncrypt();
-                    break;
-                case EncryptType.AES:
-                    encrypt = new AESEncrypt();
-                    break;
-            }
+            var encrypt = CreateEncryptor(typecs);
             return encrypt.Encrypt(Text, sKey);
         }
 
@@ -85,6 +67,16 @@ namespace SyZero.Web.Common
             };
             var outputBytes = aes.CreateDecryptor().TransformFinalBlock(decryptedBytes, 0, decryptedBytes.Length);
             return outputBytes;
+        }
+
+        private static IEncrypt CreateEncryptor(EncryptType typecs)
+        {
+            return typecs switch
+            {
+                EncryptType.DES => new DESEncrypt(),
+                EncryptType.AES => new AESEncrypt(),
+                _ => throw new ArgumentOutOfRangeException(nameof(typecs), typecs, "Unsupported encryption type.")
+            };
         }
     }
 }

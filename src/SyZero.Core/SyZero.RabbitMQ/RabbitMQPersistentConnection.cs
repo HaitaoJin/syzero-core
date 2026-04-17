@@ -60,46 +60,51 @@ namespace SyZero.RabbitMQ
 
             lock (_lock)
             {
+                if (IsConnected)
+                {
+                    return true;
+                }
+
+                var maxRetryCount = Math.Max(_retryCount, 1);
                 var retryCount = 0;
 
-                while (retryCount < _retryCount)
+                while (retryCount < maxRetryCount)
                 {
                     try
                     {
-                        _connection = _connectionFactory.CreateConnection();
-
-                        if (IsConnected)
+                        var connection = _connectionFactory.CreateConnection();
+                        if (connection != null && connection.IsOpen)
                         {
-                            _connection.ConnectionShutdown += OnConnectionShutdown;
-                            _connection.CallbackException += OnCallbackException;
-                            _connection.ConnectionBlocked += OnConnectionBlocked;
+                            ReplaceConnection(connection);
 
                             _logger.LogInformation(
-                                $"RabbitMQ 客户端已连接到 '{_connection.Endpoint.HostName}' 并订阅失败事件");
+                            $"RabbitMQ 客户端已连接到 '{_connection.Endpoint.HostName}' 并订阅失败事件");
 
                             return true;
                         }
+
+                        connection?.Dispose();
                     }
                     catch (SocketException ex)
                     {
                         retryCount++;
                         _logger.LogWarning(ex, 
-                            $"RabbitMQ 连接失败，正在重试... ({retryCount}/{_retryCount})");
+                            $"RabbitMQ 连接失败，正在重试... ({retryCount}/{maxRetryCount})");
                     }
                     catch (BrokerUnreachableException ex)
                     {
                         retryCount++;
                         _logger.LogWarning(ex,
-                            $"RabbitMQ Broker 不可达，正在重试... ({retryCount}/{_retryCount})");
+                            $"RabbitMQ Broker 不可达，正在重试... ({retryCount}/{maxRetryCount})");
                     }
 
-                    if (retryCount < _retryCount)
+                    if (retryCount < maxRetryCount)
                     {
                         System.Threading.Thread.Sleep(TimeSpan.FromSeconds(Math.Pow(2, retryCount)));
                     }
                 }
 
-                _logger.LogCritical($"无法建立 RabbitMQ 连接，已重试 {_retryCount} 次");
+                _logger.LogCritical($"无法建立 RabbitMQ 连接，已重试 {maxRetryCount} 次");
                 return false;
             }
         }
@@ -142,6 +147,7 @@ namespace SyZero.RabbitMQ
 
             try
             {
+                DetachConnectionEvents(_connection);
                 _connection?.Dispose();
                 _logger.LogInformation("RabbitMQ 连接已释放");
             }
@@ -149,6 +155,29 @@ namespace SyZero.RabbitMQ
             {
                 _logger.LogCritical(ex, "释放 RabbitMQ 连接时发生异常");
             }
+        }
+
+        private void ReplaceConnection(IConnection connection)
+        {
+            DetachConnectionEvents(_connection);
+            _connection?.Dispose();
+
+            _connection = connection;
+            _connection.ConnectionShutdown += OnConnectionShutdown;
+            _connection.CallbackException += OnCallbackException;
+            _connection.ConnectionBlocked += OnConnectionBlocked;
+        }
+
+        private void DetachConnectionEvents(IConnection connection)
+        {
+            if (connection == null)
+            {
+                return;
+            }
+
+            connection.ConnectionShutdown -= OnConnectionShutdown;
+            connection.CallbackException -= OnCallbackException;
+            connection.ConnectionBlocked -= OnConnectionBlocked;
         }
     }
 }

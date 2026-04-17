@@ -107,9 +107,24 @@ namespace SyZero.Redis
         /// </summary>
         public void Validate()
         {
-            if (string.IsNullOrEmpty(KeyPrefix))
+            if (string.IsNullOrWhiteSpace(KeyPrefix))
             {
                 throw new ArgumentException("KeyPrefix 不能为空");
+            }
+
+            if (string.IsNullOrWhiteSpace(LeaderKeyPrefix))
+            {
+                throw new ArgumentException("LeaderKeyPrefix 不能为空");
+            }
+
+            if (string.IsNullOrWhiteSpace(ServiceNamesKey))
+            {
+                throw new ArgumentException("ServiceNamesKey 不能为空");
+            }
+
+            if (string.IsNullOrWhiteSpace(PubSubChannelPrefix))
+            {
+                throw new ArgumentException("PubSubChannelPrefix 不能为空");
             }
 
             if (HealthCheckIntervalSeconds < 1)
@@ -117,9 +132,29 @@ namespace SyZero.Redis
                 throw new ArgumentException("HealthCheckIntervalSeconds 必须大于 0");
             }
 
+            if (HealthCheckTimeoutSeconds < 1)
+            {
+                throw new ArgumentException("HealthCheckTimeoutSeconds 必须大于 0");
+            }
+
             if (ServiceExpireSeconds < HealthCheckIntervalSeconds)
             {
                 throw new ArgumentException("ServiceExpireSeconds 必须大于 HealthCheckIntervalSeconds");
+            }
+
+            if (AutoCleanIntervalSeconds < 1)
+            {
+                throw new ArgumentException("AutoCleanIntervalSeconds 必须大于 0");
+            }
+
+            if (ServiceCleanSeconds < ServiceExpireSeconds)
+            {
+                throw new ArgumentException("ServiceCleanSeconds 必须大于或等于 ServiceExpireSeconds");
+            }
+
+            if (LeaderLockExpireSeconds < 1)
+            {
+                throw new ArgumentException("LeaderLockExpireSeconds 必须大于 0");
             }
 
             if (LeaderLockRenewIntervalSeconds >= LeaderLockExpireSeconds)

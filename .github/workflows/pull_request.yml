@@ -25,7 +25,7 @@ jobs:
         dotnet-version: 9.0.x
 
     - name: Restore dependencies
-      run: dotnet restore ./src/SyZero.sln
+      run: dotnet restore ./SyZero.slnx
 
     - name: Build
-      run: dotnet build --configuration Release ./src/SyZero.sln --no-restore
+      run: dotnet build --configuration Release ./SyZero.slnx --no-restore

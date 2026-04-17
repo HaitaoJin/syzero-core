@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,13 +15,17 @@ namespace SyZero.Consul
     public sealed class ConsulConfigurationParser
     {
         private readonly IConsulConfigurationSource consulConfigurationSource;
+        private readonly Func<string, QueryOptions, CancellationToken, Task<QueryResult<KVPair>>> kvPairLoader;
         private readonly object lastIndexLock = new object();
         private ulong lastIndex;
         private ConfigurationReloadToken reloadToken = new ConfigurationReloadToken();
 
-        public ConsulConfigurationParser(IConsulConfigurationSource consulConfigurationSource)
+        public ConsulConfigurationParser(
+            IConsulConfigurationSource consulConfigurationSource,
+            Func<string, QueryOptions, CancellationToken, Task<QueryResult<KVPair>>> kvPairLoader = null)
         {
             this.consulConfigurationSource = consulConfigurationSource;
+            this.kvPairLoader = kvPairLoader;
         }
 
         /// <summary>
@@ -44,11 +49,13 @@ namespace SyZero.Consul
                         return new Dictionary<string, string>();
                     }
                 case null:
-                    throw new FormatException("Error_ValueNotExist" + source.ServiceKey);
+                    return new Dictionary<string, string>();
                 default:
                     this.UpdateLastIndex(kvPair);
 
-                    return JsonConfigurationFileParser.Parse(source.ServiceKey, new MemoryStream(kvPair.Response.Value));
+                    return JsonConfigurationFileParser.Parse(
+                        source.ServiceKey,
+                        new MemoryStream(kvPair.Response.Value ?? Encoding.UTF8.GetBytes("{}")));
             }
         }
 
@@ -67,20 +74,17 @@ namespace SyZero.Consul
 
         private async Task<QueryResult<KVPair>> GetKvPairs(string key, QueryOptions queryOptions, CancellationToken cancellationToken)
         {
+            if (this.kvPairLoader != null)
+            {
+                return await this.kvPairLoader(key, queryOptions, cancellationToken).ConfigureAwait(false);
+            }
+
             using (IConsulClient consulClient = new ConsulClient(
                 this.consulConfigurationSource.ConsulClientConfiguration,
                 this.consulConfigurationSource.ConsulHttpClient,
                 this.consulConfigurationSource.ConsulHttpClientHandler))
             {
                 QueryResult<KVPair> result = await consulClient.KV.Get(key, queryOptions, cancellationToken).ConfigureAwait(false);
-                if (result.StatusCode == HttpStatusCode.NotFound)
-                {
-                    await consulClient.KV.Put(new KVPair(key)
-                    {
-                        Value = "{}".ToBytes()
-                    });
-                    result = await consulClient.KV.Get(key, queryOptions, cancellationToken).ConfigureAwait(false);
-                }
 
                 switch (result.StatusCode)
                 {

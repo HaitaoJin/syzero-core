@@ -1,8 +1,9 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using RestSharp;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,11 +19,17 @@ namespace SyZero.Web.Common.Util
     {
         public async Task<ResponseTemplate<T>> ExecuteAsync<T>(RequestTemplate requestTemplate, CancellationToken cancellationToken)
         {
+            if (requestTemplate == null)
+            {
+                throw new ArgumentNullException(nameof(requestTemplate));
+            }
+
             var client = SyZeroUtil.GetService<RestClient>();
-            var requset = new RestRequest(requestTemplate.Url, GetMethod(requestTemplate));
-            requset.AddHeaders(requestTemplate.Headers);
-            requset.AddJsonBody(requestTemplate.Body ?? "");
-            foreach (var item in requestTemplate.QueryValue)
+            var method = GetMethod(requestTemplate);
+            var requset = new RestRequest(requestTemplate.Url, method);
+            AddHeaders(requset, requestTemplate.Headers);
+            AddRequestBody(requset, requestTemplate, method);
+            foreach (var item in requestTemplate.QueryValue ?? Enumerable.Empty<KeyValuePair<string, string>>())
             {
                 requset.AddQueryParameter(item.Key, item.Value);
             }
@@ -56,29 +63,89 @@ namespace SyZero.Web.Common.Util
         {
             var responseTemplate = new ResponseTemplate<T>();
             responseTemplate.HttpStatusCode = response.StatusCode;
-            if (response.IsSuccessful)
+            if (!response.IsSuccessful)
             {
-                var data = JsonConvert.DeserializeObject<dynamic>(response.Content);
-                responseTemplate.Code = data.code;
-                if (data.code == (int)SyMessageBoxStatus.Success)
+                responseTemplate.Msg = response.ErrorMessage ?? response.Content;
+                return responseTemplate;
+            }
+
+            if (string.IsNullOrWhiteSpace(response.Content))
+            {
+                return responseTemplate;
+            }
+
+            try
+            {
+                var payload = JObject.Parse(response.Content);
+                responseTemplate.Code = (SyMessageBoxStatus?)(payload["code"]?.Value<int?>()) ?? default;
+                if (responseTemplate.Code == SyMessageBoxStatus.Success)
                 {
-                    string jsonStr = data.data.ToString();
-                    var ddd = typeof(T);
+                    var dataToken = payload["data"];
+                    if (dataToken == null || dataToken.Type == JTokenType.Null)
+                    {
+                        return responseTemplate;
+                    }
+
                     if (typeof(T) == typeof(string))
                     {
-                        responseTemplate.Body = data.data;
+                        var value = dataToken.Type == JTokenType.String
+                            ? dataToken.Value<string>()
+                            : dataToken.ToString(Formatting.None);
+                        responseTemplate.Body = (T)(object)value;
                     }
                     else
                     {
-                        responseTemplate.Body = JsonConvert.DeserializeObject<T>(jsonStr);
+                        responseTemplate.Body = JsonConvert.DeserializeObject<T>(dataToken.ToString(Formatting.None));
                     }
                 }
                 else
                 {
-                    responseTemplate.Msg = data.msg;
+                    responseTemplate.Msg = payload["msg"]?.Value<string>() ?? payload["message"]?.Value<string>() ?? response.Content;
                 }
             }
+            catch (JsonException)
+            {
+                responseTemplate.Msg = response.Content;
+            }
+
             return responseTemplate;
+        }
+
+        private static void AddHeaders(RestRequest request, IDictionary<string, string> headers)
+        {
+            if (headers == null)
+            {
+                return;
+            }
+
+            foreach (var header in headers)
+            {
+                request.AddHeader(header.Key, header.Value);
+            }
+        }
+
+        private static void AddRequestBody(RestRequest request, RequestTemplate requestTemplate, Method method)
+        {
+            if (method == Method.Get)
+            {
+                return;
+            }
+
+            if (requestTemplate.IsForm)
+            {
+                foreach (var item in requestTemplate.FormValue ?? Enumerable.Empty<KeyValuePair<string, string>>())
+                {
+                    request.AddParameter(item.Key, item.Value);
+                }
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(requestTemplate.Body))
+            {
+                return;
+            }
+
+            request.AddStringBody(requestTemplate.Body, DataFormat.Json);
         }
     }
 }

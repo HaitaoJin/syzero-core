@@ -13,11 +13,19 @@
         </member>
         <member name="M:SyZero.EntityFrameworkCore.SyZeroEntityFrameworkExtension.AddSyZeroEntityFramework``1(Microsoft.Extensions.DependencyInjection.IServiceCollection)">
             <summary>
-            注册EntityFramework
+            注册 EntityFramework。
             </summary>
             <typeparam name="TContext"></typeparam>
-            <param name="builder"></param>
-            <param name="configuration"></param>
+            <param name="services"></param>
+            <returns></returns>
+        </member>
+        <member name="M:SyZero.EntityFrameworkCore.SyZeroEntityFrameworkExtension.AddSyZeroEntityFramework``1(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{Microsoft.EntityFrameworkCore.DbContextOptionsBuilder})">
+            <summary>
+            使用自定义 DbContextOptions 注册 EntityFramework。
+            </summary>
+            <typeparam name="TContext"></typeparam>
+            <param name="services"></param>
+            <param name="optionsAction"></param>
             <returns></returns>
         </member>
         <member name="T:SyZero.EntityFrameworkCore.EfCoreTransactionScope">

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <Description>SyZero 中的 SPA 开发代理与前端构建扩展</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="buildTransitive\SyZero.AspNetCore.SpaProxy.props" Pack="true" PackagePath="buildTransitive\SyZero.AspNetCore.SpaProxy.props" />
+    <None Include="buildTransitive\SyZero.AspNetCore.SpaProxy.targets" Pack="true" PackagePath="buildTransitive\SyZero.AspNetCore.SpaProxy.targets" />
+  </ItemGroup>
+
+</Project>

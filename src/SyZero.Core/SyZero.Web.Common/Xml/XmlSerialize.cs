@@ -1,4 +1,4 @@
-﻿using System.Xml;
+using System.Xml;
 
 namespace SyZero.Web.Common
 {
@@ -6,11 +6,21 @@ namespace SyZero.Web.Common
     {
         public bool AppendChild(string filePath, string xPath, XmlNode xmlNode)
         {
+            if (xmlNode == null)
+            {
+                return false;
+            }
+
             try
             {
                 XmlDocument doc = new XmlDocument();
                 doc.Load(filePath);
                 XmlNode xn = doc.SelectSingleNode(xPath);
+                if (xn == null)
+                {
+                    return false;
+                }
+
                 XmlNode n = doc.ImportNode(xmlNode, true);
                 xn.AppendChild(n);
                 doc.Save(filePath);
@@ -29,17 +39,23 @@ namespace SyZero.Web.Common
                 XmlDocument doc = new XmlDocument();
                 doc.Load(toFilePath);
                 XmlNode xn = doc.SelectSingleNode(toXPath);
+                if (xn == null)
+                {
+                    return false;
+                }
 
                 XmlNodeList xnList = ReadNodes(filePath, xPath);
-                if (xnList != null)
+                if (xnList == null || xnList.Count == 0)
                 {
-                    foreach (XmlElement xe in xnList)
-                    {
-                        XmlNode n = doc.ImportNode(xe, true);
-                        xn.AppendChild(n);
-                    }
-                    doc.Save(toFilePath);
+                    return false;
                 }
+
+                foreach (XmlNode xe in xnList)
+                {
+                    XmlNode n = doc.ImportNode(xe, true);
+                    xn.AppendChild(n);
+                }
+                doc.Save(toFilePath);
                 return true;
             }
             catch
@@ -69,7 +85,12 @@ namespace SyZero.Web.Common
                 XmlDocument doc = new XmlDocument();
                 doc.Load(filePath);
                 XmlNode xn = doc.SelectSingleNode(xPath);
-                XmlNodeList xnList = xn.ChildNodes;  //得到该节点的子节点
+                if (xn == null)
+                {
+                    return null;
+                }
+
+                XmlNodeList xnList = xn.ChildNodes;
                 return xnList;
             }
             catch
@@ -85,8 +106,12 @@ namespace SyZero.Web.Common
                 XmlDocument doc = new XmlDocument();
                 doc.Load(filePath);
                 XmlNode xn = doc.SelectSingleNode(xPath);
-                XmlElement xe = (XmlElement)xn;
-                xe.InnerText = value;
+                if (xn == null)
+                {
+                    return false;
+                }
+
+                xn.InnerText = value;
                 doc.Save(filePath);
             }
             catch

@@ -24,6 +24,19 @@ namespace Microsoft.Extensions.Configuration
         /// <returns>配置构建器</returns>
         public static IConfigurationBuilder AddConsul(this IConfigurationBuilder builder, string serviceKey, CancellationToken cancellationToken, Action<IConsulConfigurationSource> options)
         {
+            if (builder == null)
+            {
+                throw new ArgumentNullException(nameof(builder));
+            }
+            if (string.IsNullOrWhiteSpace(serviceKey))
+            {
+                throw new ArgumentNullException(nameof(serviceKey));
+            }
+            if (options == null)
+            {
+                throw new ArgumentNullException(nameof(options));
+            }
+
             ConsulConfigurationSource consulConfigSource = new ConsulConfigurationSource(serviceKey, cancellationToken);
             options(consulConfigSource);
             return builder.Add(consulConfigSource);
@@ -39,9 +52,22 @@ namespace Microsoft.Extensions.Configuration
         /// <returns>配置构建器</returns>
         public static IConfigurationBuilder AddConsul(this IConfigurationBuilder builder, CancellationToken cancellationToken, IConfiguration configuration = null, string sectionName = ConsulServiceOptions.SectionName)
         {
+            if (builder == null)
+            {
+                throw new ArgumentNullException(nameof(builder));
+            }
+
             var config = configuration ?? AppConfig.Configuration;
             var consulOptions = new ConsulServiceOptions();
             config.GetSection(sectionName).Bind(consulOptions);
+            if (string.IsNullOrWhiteSpace(consulOptions.ConsulAddress))
+            {
+                throw new InvalidOperationException($"未在配置节 {sectionName} 中找到有效的 ConsulAddress。");
+            }
+            if (string.IsNullOrWhiteSpace(AppConfig.ServerOptions.Name))
+            {
+                throw new InvalidOperationException("未配置 SyZero:Name，无法确定 Consul KV 的服务键。");
+            }
             
             return builder.AddConsul(AppConfig.ServerOptions.Name, cancellationToken, source =>
             {

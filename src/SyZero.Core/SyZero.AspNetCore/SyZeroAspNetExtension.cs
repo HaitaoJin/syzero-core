@@ -1,16 +1,12 @@
-﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyModel;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.Loader;
-using System.Text;
-using SyZero.AspNetCore;
 using SyZero.AspNetCore.Controllers;
 using SyZero.AspNetCore.Middleware;
-using SyZero.Dependency;
 
 namespace SyZero
 {
@@ -25,18 +21,51 @@ namespace SyZero
         /// <returns></returns>
         public static IServiceCollection AddSyZeroController(this IServiceCollection services)
         {
+            ArgumentNullException.ThrowIfNull(services);
+
             services.AddScoped<SyAuthMiddleware>();
 
             // 获取所有实现了SyZeroController的类型
-            var transientDependency = ReflectionHelper.GetTypes()
-                                .Where(t => t.IsClass && typeof(SyZeroController).IsAssignableFrom(t));
-            foreach (var type in transientDependency)
+            foreach (var type in GetControllerTypes())
             {
-                services.AddScoped(type);
+                if (!services.IsAdded(type))
+                {
+                    services.AddScoped(type);
+                }
             }
 
-            services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+            services.TryAddSingleton<IHttpContextAccessor, HttpContextAccessor>();
             return services;
+        }
+
+        private static IEnumerable<Type> GetControllerTypes()
+        {
+            foreach (var assembly in ReflectionHelper.GetAssemblies())
+            {
+                IEnumerable<Type> types;
+                try
+                {
+                    types = assembly.GetTypes();
+                }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    types = ex.Types.Where(type => type != null);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                foreach (var type in types.Where(type =>
+                             type != null
+                             && type.IsClass
+                             && !type.IsAbstract
+                             && !type.ContainsGenericParameters
+                             && typeof(SyZeroController).IsAssignableFrom(type)))
+                {
+                    yield return type;
+                }
+            }
         }
     }
 }

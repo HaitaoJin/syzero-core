@@ -45,7 +45,7 @@ namespace SyZero
             {
                 if (serverOptions == null)
                 {
-                    SyZeroServerOptions options = GetSection<SyZeroServerOptions>("SyZero");
+                    SyZeroServerOptions options = GetSection<SyZeroServerOptions>("SyZero") ?? new SyZeroServerOptions();
                     if (string.IsNullOrEmpty(options.Ip))
                     {
                         options.Ip = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()

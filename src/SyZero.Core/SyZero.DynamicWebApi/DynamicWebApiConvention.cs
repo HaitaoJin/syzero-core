@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc.ModelBinding;
 using System;
 using System.Collections.Concurrent;
 using System.Linq;
+using System.Net.Http;
 using System.Reflection;
 using SyZero.Application.Attributes;
 using SyZero.Application.Routing;
@@ -60,20 +61,26 @@ namespace SyZero.DynamicWebApi
         private void ConfigureController(ControllerModel controller)
         {
             var type = controller.ControllerType.AsType();
-            var DynamicWebApiAttr = GetDynamicApiAttribute(type.GetTypeInfo());
+            var dynamicWebApiAttr = GetDynamicApiAttribute(type.GetTypeInfo());
 
             // 检查是否为动态 WebApi 类型
             var isDynamicWebApi = typeof(IDynamicApi).GetTypeInfo().IsAssignableFrom(type);
 
-            if (isDynamicWebApi || DynamicWebApiAttr != null)
+            if (ReflectionHelper.GetSingleAttributeOrDefaultByFullSearch<NonDynamicApiAttribute>(type.GetTypeInfo()) != null ||
+                ReflectionHelper.GetSingleAttributeOrDefaultByFullSearch<NonWebApiServiceAttribute>(type.GetTypeInfo()) != null)
+            {
+                return;
+            }
+
+            if (isDynamicWebApi || dynamicWebApiAttr != null)
             {
                 if (isDynamicWebApi)
                 {
                     controller.ControllerName = GetControllerName(controller.ControllerName);
                 }
 
-                ConfigureArea(controller, DynamicWebApiAttr);
-                ConfigureDynamicWebApi(controller, DynamicWebApiAttr);
+                ConfigureArea(controller, dynamicWebApiAttr);
+                ConfigureDynamicWebApi(controller, dynamicWebApiAttr);
             }
         }
 
@@ -103,18 +110,13 @@ namespace SyZero.DynamicWebApi
         /// </summary>
         private void ConfigureArea(ControllerModel controller, DynamicApiAttribute attr)
         {
-            if (attr == null)
-            {
-                throw new ArgumentNullException(nameof(attr));
-            }
-
             if (controller.RouteValues.ContainsKey("area"))
             {
                 return;
             }
 
             // 优先使用特性指定的模块名，其次使用默认区域名
-            var areaName = !string.IsNullOrEmpty(attr.Module)
+            var areaName = !string.IsNullOrEmpty(attr?.Module)
                 ? attr.Module
                 : _options.DefaultAreaName;
 
@@ -303,6 +305,11 @@ namespace SyZero.DynamicWebApi
                 return;
             }
 
+            if (controller.Selectors.IsNullOrEmpty())
+            {
+                controller.Selectors.Add(new SelectorModel());
+            }
+
             var areaName = controllerAttr?.Module ?? _options.DefaultAreaName ?? string.Empty;
             var customApiName = controller.ControllerType.GetSingleAttributeOrDefaultByFullSearch<ApiAttribute>();
             var controllerName = customApiName?.Name ?? controller.ControllerName;
@@ -360,30 +367,33 @@ namespace SyZero.DynamicWebApi
         /// <summary>
         /// 添加默认选择器
         /// </summary>
-        private static void AddDefaultSelector(string areaName, string controllerName, ActionModel action)
+        private void AddDefaultSelector(string areaName, string controllerName, ActionModel action)
         {
-            var template = RoutingHelper.GetHttpTemplateV2(action.ActionMethod);
-            var verb = RoutingHelper.GetHttpVerbV2(action.ActionMethod);
+            if (action.Selectors.IsNullOrEmpty())
+            {
+                action.Selectors.Add(new SelectorModel());
+            }
 
             var selector = action.Selectors[0];
 
             selector.AttributeRouteModel ??= CreateActionRouteModel(areaName, controllerName, action);
 
-            if (!string.IsNullOrEmpty(template))
+            var template = GetActionRouteTemplate(action);
+            if (template != null)
             {
                 selector.AttributeRouteModel.Template = template;
             }
 
-            if (!selector.ActionConstraints.Any())
+            if (!selector.ActionConstraints.OfType<HttpMethodActionConstraint>().Any())
             {
-                selector.ActionConstraints.Add(new HttpMethodActionConstraint(new[] { verb.ToString() }));
+                selector.ActionConstraints.Add(new HttpMethodActionConstraint([GetHttpVerb(action).Method]));
             }
         }
 
         /// <summary>
         /// 规范化选择器路由
         /// </summary>
-        private static void NormalizeSelectorRoutes(string areaName, string controllerName, ActionModel action)
+        private void NormalizeSelectorRoutes(string areaName, string controllerName, ActionModel action)
         {
             foreach (var selector in action.Selectors)
             {
@@ -398,10 +408,70 @@ namespace SyZero.DynamicWebApi
         /// <summary>
         /// 创建 Action 路由模型
         /// </summary>
-        private static AttributeRouteModel CreateActionRouteModel(string areaName, string controllerName, ActionModel action)
+        private AttributeRouteModel CreateActionRouteModel(string areaName, string controllerName, ActionModel action)
+        {
+            return new AttributeRouteModel(new RouteAttribute(GetActionRouteTemplate(action) ?? string.Empty));
+        }
+
+        private string GetActionRouteTemplate(ActionModel action)
         {
             var template = RoutingHelper.GetHttpTemplateV2(action.ActionMethod);
-            return new AttributeRouteModel(new RouteAttribute(template ?? action.ActionName));
+            if (template != null)
+            {
+                return _options.EnableLowerCaseRoutes ? template.ToLowerInvariant() : template;
+            }
+
+            var actionName = action.ActionMethod.Name;
+            foreach (var postfix in _options.RemoveActionPostfixes)
+            {
+                if (actionName.EndsWith(postfix, StringComparison.OrdinalIgnoreCase))
+                {
+                    actionName = actionName.Substring(0, actionName.Length - postfix.Length);
+                    break;
+                }
+            }
+
+            if (_options.GetRestFulActionName != null)
+            {
+                actionName = _options.GetRestFulActionName(actionName);
+            }
+
+            return _options.EnableLowerCaseRoutes ? actionName.ToLowerInvariant() : actionName;
+        }
+
+        private HttpMethod GetHttpVerb(ActionModel action)
+        {
+            var verb = RoutingHelper.GetHttpVerbV2(action.ActionMethod);
+            if (verb != HttpMethod.Get || HasExplicitHttpMethod(action.ActionMethod))
+            {
+                return verb;
+            }
+
+            var methodName = action.ActionMethod.Name;
+            foreach (var postfix in _options.RemoveActionPostfixes)
+            {
+                if (methodName.EndsWith(postfix, StringComparison.OrdinalIgnoreCase))
+                {
+                    methodName = methodName.Substring(0, methodName.Length - postfix.Length);
+                    break;
+                }
+            }
+
+            foreach (var mapping in _options.HttpVerbMappings.OrderByDescending(item => item.Key.Length))
+            {
+                if (methodName.StartsWith(mapping.Key, StringComparison.OrdinalIgnoreCase))
+                {
+                    return new HttpMethod(mapping.Value);
+                }
+            }
+
+            return new HttpMethod(_options.DefaultHttpVerb);
+        }
+
+        private static bool HasExplicitHttpMethod(MemberInfo memberInfo)
+        {
+            var target = memberInfo.GetInterfaceMemberInfo() ?? memberInfo;
+            return target.GetCustomAttribute<SyZero.Application.Routing.HttpMethodAttribute>() != null;
         }
 
         #endregion

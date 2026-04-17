@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Microsoft.AspNetCore.Builder;
@@ -7,10 +6,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using ProtoBuf.Grpc.Server;
-using SyZero.Application.Attributes;
 using SyZero.Application.Service;
-using SyZero.Client;
-using SyZero.DynamicGrpc.Attributes;
 using SyZero.DynamicGrpc.Helpers;
 
 namespace SyZero.DynamicGrpc
@@ -34,6 +30,11 @@ namespace SyZero.DynamicGrpc
         /// <exception cref="ArgumentNullException">options 为 null 时抛出</exception>
         public static IServiceCollection AddDynamicGrpc(this IServiceCollection services, DynamicGrpcOptions options)
         {
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+
             if (options == null)
             {
                 throw new ArgumentNullException(nameof(options));
@@ -68,6 +69,39 @@ namespace SyZero.DynamicGrpc
         }
 
         /// <summary>
+        /// 添加指定程序集中的 Dynamic gRPC 服务到依赖注入容器
+        /// </summary>
+        /// <param name="services">服务集合</param>
+        /// <param name="assembly">主程序集</param>
+        /// <param name="additionalAssemblies">额外程序集</param>
+        /// <returns>服务集合</returns>
+        public static IServiceCollection AddDynamicGrpc(this IServiceCollection services, Assembly assembly, params Assembly[] additionalAssemblies)
+        {
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+
+            if (assembly == null)
+            {
+                throw new ArgumentNullException(nameof(assembly));
+            }
+
+            var options = new DynamicGrpcOptions();
+            options.AddAssemblyOptions(assembly);
+
+            foreach (var additionalAssembly in additionalAssemblies ?? Array.Empty<Assembly>())
+            {
+                if (additionalAssembly != null)
+                {
+                    options.AddAssemblyOptions(additionalAssembly);
+                }
+            }
+
+            return AddDynamicGrpc(services, options);
+        }
+
+        /// <summary>
         /// 添加 Dynamic gRPC 服务到依赖注入容器（从配置读取）
         /// </summary>
         /// <param name="services">服务集合</param>
@@ -76,7 +110,13 @@ namespace SyZero.DynamicGrpc
         /// <returns>服务集合</returns>
         public static IServiceCollection AddDynamicGrpc(this IServiceCollection services, IConfiguration configuration = null, string sectionName = DynamicGrpcOptions.SectionName)
         {
-            var config = configuration ?? AppConfig.Configuration;
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+
+            var config = configuration ?? AppConfig.Configuration
+                ?? throw new InvalidOperationException("未提供 IConfiguration，且 AppConfig.Configuration 尚未初始化。");
             var options = new DynamicGrpcOptions();
             config.GetSection(sectionName).Bind(options);
             return AddDynamicGrpc(services, options);
@@ -92,7 +132,13 @@ namespace SyZero.DynamicGrpc
         /// <returns>服务集合</returns>
         public static IServiceCollection AddDynamicGrpc(this IServiceCollection services, Action<DynamicGrpcOptions> optionsAction, IConfiguration configuration = null, string sectionName = DynamicGrpcOptions.SectionName)
         {
-            var config = configuration ?? AppConfig.Configuration;
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+
+            var config = configuration ?? AppConfig.Configuration
+                ?? throw new InvalidOperationException("未提供 IConfiguration，且 AppConfig.Configuration 尚未初始化。");
             var options = new DynamicGrpcOptions();
             config.GetSection(sectionName).Bind(options);
             optionsAction?.Invoke(options);
@@ -106,8 +152,14 @@ namespace SyZero.DynamicGrpc
         /// <returns>端点路由构建器</returns>
         public static IEndpointRouteBuilder MapDynamicGrpcServices(this IEndpointRouteBuilder endpoints)
         {
+            if (endpoints == null)
+            {
+                throw new ArgumentNullException(nameof(endpoints));
+            }
+
             var options = endpoints.ServiceProvider.GetRequiredService<DynamicGrpcOptions>();
-            var serviceTypes = GetDynamicGrpcServiceTypes(options);
+            var typeProvider = endpoints.ServiceProvider.GetRequiredService<DynamicGrpcServiceTypeProvider>();
+            var serviceTypes = DynamicGrpcServiceDiscovery.GetServiceTypes(options, typeProvider);
 
             foreach (var serviceType in serviceTypes)
             {
@@ -127,8 +179,14 @@ namespace SyZero.DynamicGrpc
             this IEndpointRouteBuilder endpoints,
             Action<object> configureOptions)
         {
+            if (endpoints == null)
+            {
+                throw new ArgumentNullException(nameof(endpoints));
+            }
+
             var options = endpoints.ServiceProvider.GetRequiredService<DynamicGrpcOptions>();
-            var serviceTypes = GetDynamicGrpcServiceTypes(options);
+            var typeProvider = endpoints.ServiceProvider.GetRequiredService<DynamicGrpcServiceTypeProvider>();
+            var serviceTypes = DynamicGrpcServiceDiscovery.GetServiceTypes(options, typeProvider);
 
             foreach (var serviceType in serviceTypes)
             {
@@ -162,7 +220,7 @@ namespace SyZero.DynamicGrpc
                 return genericMethod.Invoke(null, new object[] { endpoints });
             }
 
-            return null;
+            throw new InvalidOperationException("未能找到 protobuf-net.Grpc 的 MapGrpcService 扩展方法。");
         }
 
         /// <summary>
@@ -170,13 +228,17 @@ namespace SyZero.DynamicGrpc
         /// </summary>
         private static void RegisterDynamicGrpcServices(IServiceCollection services, DynamicGrpcOptions options)
         {
-            var serviceTypes = GetDynamicGrpcServiceTypes(options);
+            var typeProvider = services.GetSingletonInstanceOrNull<DynamicGrpcServiceTypeProvider>()
+                ?? new DynamicGrpcServiceTypeProvider(options);
+            var serviceTypes = DynamicGrpcServiceDiscovery.GetServiceTypes(options, typeProvider);
 
             foreach (var serviceType in serviceTypes)
             {
                 // 获取服务实现的所有接口
                 var interfaces = serviceType.GetInterfaces()
-                    .Where(i => typeof(IDynamicApi).IsAssignableFrom(i) && i != typeof(IDynamicApi));
+                    .Where(i => typeof(IDynamicApi).IsAssignableFrom(i) &&
+                                i != typeof(IDynamicApi) &&
+                                TypeHelper.IsValidGrpcServiceInterface(i));
 
                 foreach (var serviceInterface in interfaces)
                 {
@@ -195,75 +257,5 @@ namespace SyZero.DynamicGrpc
             }
         }
 
-        /// <summary>
-        /// 获取所有动态 gRPC 服务类型
-        /// </summary>
-        private static IEnumerable<Type> GetDynamicGrpcServiceTypes(DynamicGrpcOptions options)
-        {
-            var assemblies = ReflectionHelper.GetAssemblies();
-            var serviceTypes = new List<Type>();
-
-            foreach (var assembly in assemblies)
-            {
-                try
-                {
-                    var types = assembly.GetTypes()
-                        .Where(type => IsValidDynamicGrpcService(type.GetTypeInfo()));
-
-                    serviceTypes.AddRange(types);
-                }
-                catch (ReflectionTypeLoadException)
-                {
-                    // 忽略无法加载的程序集
-                }
-            }
-
-            return serviceTypes;
-        }
-
-        /// <summary>
-        /// 验证类型是否为有效的动态 gRPC 服务
-        /// </summary>
-        private static bool IsValidDynamicGrpcService(TypeInfo typeInfo)
-        {
-            // 基本条件检查
-            if (!typeInfo.IsPublic || typeInfo.IsAbstract || typeInfo.IsGenericType || !typeInfo.IsClass)
-            {
-                return false;
-            }
-
-            // 必须实现 IDynamicApi
-            if (!typeof(IDynamicApi).IsAssignableFrom(typeInfo.AsType()))
-            {
-                return false;
-            }
-
-            // 不能是 IFallback 类型
-            if (typeof(IFallback).IsAssignableFrom(typeInfo.AsType()))
-            {
-                return false;
-            }
-
-            // 必须有 DynamicApiAttribute 标记（DynamicApi 默认启用 gRPC）
-            var dynamicApiAttr = ReflectionHelper.GetSingleAttributeOrDefaultByFullSearch<DynamicApiAttribute>(typeInfo);
-            if (dynamicApiAttr == null)
-            {
-                return false;
-            }
-
-            // 不能有 NonDynamicApiAttribute 排除标记
-            if (ReflectionHelper.GetSingleAttributeOrDefaultByFullSearch<NonDynamicApiAttribute>(typeInfo) != null)
-            {
-                return false;
-            }
-
-            // 不能有 NonGrpcServiceAttribute 排除标记（用于排除某个 DynamicApi 不注册为 gRPC）
-            if (ReflectionHelper.GetSingleAttributeOrDefaultByFullSearch<NonGrpcServiceAttribute>(typeInfo) != null)
-            {
-                return false;
-            }
-
-            return true;
-        }
     }
 }

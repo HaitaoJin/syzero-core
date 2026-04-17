@@ -1,0 +1,81 @@
+<Project>
+  <PropertyGroup>
+    <_SyZeroFrontendBuildAfterTargets>Build</_SyZeroFrontendBuildAfterTargets>
+    <_SyZeroFrontendBuildAfterTargets Condition="'$(GenerateSwaggerJsonOnBuild)' == 'true'">SyZeroGenerateSwaggerJson</_SyZeroFrontendBuildAfterTargets>
+  </PropertyGroup>
+
+  <Target Name="SyZeroWriteSpaConfigurationToDisk" BeforeTargets="AssignTargetPaths"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(SpaProxyServerUrl)' != '' and '$(SpaProxyLaunchCommand)' != ''">
+    <PropertyGroup>
+      <_SpaProxyServerLaunchConfig>$(IntermediateOutputPath)spa.proxy.json</_SpaProxyServerLaunchConfig>
+      <_SpaRootFullPath>$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(SpaRoot)'))))</_SpaRootFullPath>
+      <_SpaProxyServerUrlJson>$([System.String]::Copy('$(SpaProxyServerUrl)').Replace('\', '\\').Replace('&quot;', '\&quot;'))</_SpaProxyServerUrlJson>
+      <_SpaProxyRedirectUrlJson>$([System.String]::Copy('$(SpaProxyRedirectUrl)').Replace('\', '\\').Replace('&quot;', '\&quot;'))</_SpaProxyRedirectUrlJson>
+      <_SpaProxyLaunchCommandJson>$([System.String]::Copy('$(SpaProxyLaunchCommand)').Replace('\', '\\').Replace('&quot;', '\&quot;'))</_SpaProxyLaunchCommandJson>
+      <_SpaRootFullPathJson>$([System.String]::Copy('$(_SpaRootFullPath)').Replace('\', '\\').Replace('&quot;', '\&quot;'))</_SpaRootFullPathJson>
+      <_SpaProxyKeepRunningJson>$([System.String]::Copy('$(SpaProxyKeepRunning)').ToLowerInvariant())</_SpaProxyKeepRunningJson>
+    </PropertyGroup>
+    <ItemGroup>
+      <_SpaProxyServerLaunchConfigLines Include="{" />
+      <_SpaProxyServerLaunchConfigLines Include="  &quot;SpaProxyServer&quot;: {" />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;ServerUrl&quot;: &quot;$(_SpaProxyServerUrlJson)&quot;," />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;RedirectUrl&quot;: &quot;$(_SpaProxyRedirectUrlJson)&quot;," Condition="'$(SpaProxyRedirectUrl)' != ''" />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;RedirectUrl&quot;: &quot;$(_SpaProxyServerUrlJson)&quot;," Condition="'$(SpaProxyRedirectUrl)' == ''" />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;LaunchCommand&quot;: &quot;$(_SpaProxyLaunchCommandJson)&quot;," />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;WorkingDirectory&quot;: &quot;$(_SpaRootFullPathJson)&quot;," />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;MaxTimeoutInSeconds&quot;: $(SpaProxyTimeoutInSeconds)," />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;KeepRunning&quot;: $(_SpaProxyKeepRunningJson)" />
+      <_SpaProxyServerLaunchConfigLines Include="  }" />
+      <_SpaProxyServerLaunchConfigLines Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_SpaProxyServerLaunchConfig)" Lines="@(_SpaProxyServerLaunchConfigLines)" WriteOnlyWhenDifferent="true" Overwrite="true" />
+    <ItemGroup>
+      <ContentWithTargetPath Include="$(_SpaProxyServerLaunchConfig)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" TargetPath="spa.proxy.json" />
+      <FileWrites Include="$(_SpaProxyServerLaunchConfig)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="SyZeroBuildFrontend" AfterTargets="$(_SyZeroFrontendBuildAfterTargets)"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(BuildFrontendOnBuild)' == 'true' and Exists('$(FrontendProjectPath)')">
+    <Message Importance="High" Condition="'$(SwaggerOutputFile)' != ''" Text="Building frontend with Swagger input: $(SwaggerOutputFile)" />
+    <Message Importance="High" Condition="'$(SwaggerOutputFile)' == ''" Text="Building frontend with Swagger input: $(TargetDir)swagger.json" />
+    <Exec Condition="'$(SwaggerOutputFile)' != ''"
+          Command="dotnet build &quot;$(FrontendProjectPath)&quot; -c $(Configuration)"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          EnvironmentVariables="SWAGGER_INPUT_FILE=$(SwaggerOutputFile);CONFIGURATION=$(Configuration)" />
+    <Exec Condition="'$(SwaggerOutputFile)' == ''"
+          Command="dotnet build &quot;$(FrontendProjectPath)&quot; -c $(Configuration)"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          EnvironmentVariables="SWAGGER_INPUT_FILE=$(TargetDir)swagger.json;CONFIGURATION=$(Configuration)" />
+  </Target>
+
+  <Target Name="SyZeroConfigureSpaProxyRunEnvironment" BeforeTargets="ComputeRunArguments"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(SpaProxyServerUrl)' != '' and '$(SpaProxyLaunchCommand)' != '' and '$(TargetFrameworkIdentifier)' == '.NETCoreApp' and '$(_IsExecutable)' == 'true'">
+    <PropertyGroup>
+      <_SyZeroSpaProxyOriginalRunCommand>$(RunCommand)</_SyZeroSpaProxyOriginalRunCommand>
+      <_SyZeroSpaProxyOriginalRunArguments>$(RunArguments)</_SyZeroSpaProxyOriginalRunArguments>
+      <_SyZeroSpaProxyHostingStartupAssembly>SyZero.AspNetCore.SpaProxy</_SyZeroSpaProxyHostingStartupAssembly>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+      <RunCommand>cmd.exe</RunCommand>
+      <RunArguments>/c &quot;set &quot;ASPNETCORE_HOSTINGSTARTUPASSEMBLIES=$(_SyZeroSpaProxyHostingStartupAssembly);%ASPNETCORE_HOSTINGSTARTUPASSEMBLIES%&quot; &amp;&amp; &quot;$(_SyZeroSpaProxyOriginalRunCommand)&quot; $(_SyZeroSpaProxyOriginalRunArguments)&quot;</RunArguments>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+      <RunCommand>/bin/sh</RunCommand>
+      <RunArguments>-c &quot;ASPNETCORE_HOSTINGSTARTUPASSEMBLIES=\&quot;$(_SyZeroSpaProxyHostingStartupAssembly)${ASPNETCORE_HOSTINGSTARTUPASSEMBLIES:+;${ASPNETCORE_HOSTINGSTARTUPASSEMBLIES}}\&quot; exec \&quot;$(_SyZeroSpaProxyOriginalRunCommand)\&quot; $(_SyZeroSpaProxyOriginalRunArguments)&quot;</RunArguments>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="SyZeroCopyFrontendToPublish" AfterTargets="Publish"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(BuildFrontendOnBuild)' == 'true' and Exists('$(FrontendDistDir)')">
+    <ItemGroup>
+      <_SyZeroFrontendDistFiles Include="$(FrontendDistDir)**/*" />
+    </ItemGroup>
+    <MakeDir Directories="$(PublishDir)wwwroot" />
+    <Copy SourceFiles="@(_SyZeroFrontendDistFiles)"
+          DestinationFiles="@(_SyZeroFrontendDistFiles->'$(PublishDir)wwwroot/%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>

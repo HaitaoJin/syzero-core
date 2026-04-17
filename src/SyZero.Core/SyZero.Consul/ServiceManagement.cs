@@ -3,6 +3,7 @@ using NConsul.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -17,11 +18,12 @@ namespace SyZero.Consul
 {
     public class ServiceManagement : IServiceManagement
     {
+        private const string CacheKeyPrefix = "Consul:";
         private readonly IConsulClient _consulClient;
         private readonly ICache _cache;
         private readonly ConcurrentDictionary<string, Action<List<ServiceInfo>>> _subscriptions = new ConcurrentDictionary<string, Action<List<ServiceInfo>>>();
         private readonly ConcurrentDictionary<string, CancellationTokenSource> _watchTokens = new ConcurrentDictionary<string, CancellationTokenSource>();
-        private readonly Random _random = new Random();
+        private static readonly ThreadLocal<Random> RandomProvider = new ThreadLocal<Random>(() => new Random(Guid.NewGuid().GetHashCode()));
 
         public ServiceManagement(IConsulClient consulClient,
             ICache cache)
@@ -34,49 +36,45 @@ namespace SyZero.Consul
 
         public async Task<List<ServiceInfo>> GetService(string serviceName)
         {
-            if (_cache.Exist($"Consul:{serviceName}"))
+            if (string.IsNullOrWhiteSpace(serviceName))
             {
-                return _cache.Get<List<ServiceInfo>>($"Consul:{serviceName}");
+                throw new ArgumentException("服务名称不能为空。", nameof(serviceName));
             }
-            else
+
+            var cacheKey = GetCacheKey(serviceName);
+            if (_cache.Exist(cacheKey))
             {
-                var services = await _consulClient.Catalog.Service(serviceName);
-                if (services.StatusCode != System.Net.HttpStatusCode.OK)
+                var cachedServices = _cache.Get<List<ServiceInfo>>(cacheKey);
+                if (cachedServices != null)
                 {
-                    throw new Exception($"SyZero.Consul:Consul连接出错({services.StatusCode})!");
+                    return CloneServices(cachedServices);
                 }
-                if (services.Response.Length == 0)
-                {
-                    throw new Exception($"SyZero.Consul:未找到{serviceName}服务!");
-                }
-                var serviceInfos = services.Response.Select(service => 
-                {
-                    var protocolMeta = service.ServiceMeta?.FirstOrDefault(meta => meta.Key == "Protocol");
-                    var protocol = ProtocolType.HTTP;
-                    if (protocolMeta.HasValue && !string.IsNullOrEmpty(protocolMeta.Value.Value))
-                    {
-                        Enum.TryParse(protocolMeta.Value.Value, out protocol);
-                    }
-                    return new ServiceInfo()
-                    {
-                        ServiceID = service.ServiceID,
-                        ServiceName = service.ServiceName,
-                        ServiceAddress = service.ServiceAddress,
-                        ServicePort = service.ServicePort,
-                        ServiceProtocol = protocol,
-                        Tags = service.ServiceTags?.ToList() ?? new List<string>(),
-                        Metadata = service.ServiceMeta?.ToDictionary(m => m.Key, m => m.Value) ?? new Dictionary<string, string>(),
-                        IsHealthy = true,
-                        Enabled = true
-                    };
-                }).ToList();
-                _cache.Set($"Consul:{serviceName}", serviceInfos, 30);
-                return serviceInfos;
+
+                _cache.Remove(cacheKey);
             }
+
+            var services = await _consulClient.Catalog.Service(serviceName);
+            if (services.StatusCode != System.Net.HttpStatusCode.OK)
+            {
+                throw new Exception($"SyZero.Consul:Consul连接出错({services.StatusCode})!");
+            }
+            if (services.Response.Length == 0)
+            {
+                throw new Exception($"SyZero.Consul:未找到{serviceName}服务!");
+            }
+
+            var serviceInfos = services.Response.Select(MapCatalogService).ToList();
+            _cache.Set(cacheKey, serviceInfos, 30);
+            return CloneServices(serviceInfos);
         }
 
         public async Task<List<ServiceInfo>> GetHealthyServices(string serviceName)
         {
+            if (string.IsNullOrWhiteSpace(serviceName))
+            {
+                throw new ArgumentException("服务名称不能为空。", nameof(serviceName));
+            }
+
             var healthChecks = await _consulClient.Health.Service(serviceName, string.Empty, true);
             if (healthChecks.StatusCode != System.Net.HttpStatusCode.OK)
             {
@@ -86,39 +84,8 @@ namespace SyZero.Consul
             {
                 return new List<ServiceInfo>();
             }
-            return healthChecks.Response.Select(entry =>
-            {
-                var service = entry.Service;
-                var protocolMeta = service.Meta?.FirstOrDefault(meta => meta.Key == "Protocol");
-                var protocol = ProtocolType.HTTP;
-                if (protocolMeta.HasValue && !string.IsNullOrEmpty(protocolMeta.Value.Value))
-                {
-                    Enum.TryParse(protocolMeta.Value.Value, out protocol);
-                }
-                service.Meta.TryGetValue("Version", out var version);
-                service.Meta.TryGetValue("Group", out var group);
-                service.Meta.TryGetValue("Region", out var region);
-                service.Meta.TryGetValue("Zone", out var zone);
-                double.TryParse(service.Meta.TryGetValue("Weight", out var weightStr) ? weightStr : "1", out var weight);
-                return new ServiceInfo()
-                {
-                    ServiceID = service.ID,
-                    ServiceName = service.Service,
-                    ServiceAddress = service.Address,
-                    ServicePort = service.Port,
-                    ServiceProtocol = protocol,
-                    Version = version,
-                    Group = group,
-                    Tags = service.Tags?.ToList() ?? new List<string>(),
-                    Metadata = service.Meta?.ToDictionary(m => m.Key, m => m.Value) ?? new Dictionary<string, string>(),
-                    IsHealthy = true,
-                    Enabled = true,
-                    Weight = weight > 0 ? weight : 1.0,
-                    Region = region,
-                    Zone = zone,
-                    HealthCheckUrl = $"{protocol.ToString().ToLower()}://{service.Address}:{service.Port}/health"
-                };
-            }).ToList();
+
+            return healthChecks.Response.Select(MapServiceEntry).ToList();
         }
 
         public async Task<ServiceInfo> GetServiceInstance(string serviceName)
@@ -128,9 +95,8 @@ namespace SyZero.Consul
             {
                 throw new Exception($"SyZero.Consul:未找到可用的{serviceName}服务实例!");
             }
-            // 简单随机负载均衡
-            var index = _random.Next(services.Count);
-            return services[index];
+
+            return SelectByWeight(services);
         }
 
         public async Task<List<string>> GetAllServices()
@@ -149,7 +115,30 @@ namespace SyZero.Consul
 
         public async Task RegisterService(ServiceInfo serviceInfo)
         {
-            var meta = serviceInfo.Metadata ?? new Dictionary<string, string>();
+            if (serviceInfo == null)
+            {
+                throw new ArgumentNullException(nameof(serviceInfo));
+            }
+            if (string.IsNullOrWhiteSpace(serviceInfo.ServiceName))
+            {
+                throw new ArgumentException("服务名称不能为空。", nameof(serviceInfo));
+            }
+            if (string.IsNullOrWhiteSpace(serviceInfo.ServiceAddress))
+            {
+                throw new ArgumentException("服务地址不能为空。", nameof(serviceInfo));
+            }
+            if (serviceInfo.ServicePort <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(serviceInfo), "服务端口必须大于 0。");
+            }
+
+            var serviceId = string.IsNullOrWhiteSpace(serviceInfo.ServiceID)
+                ? Guid.NewGuid().ToString("N")
+                : serviceInfo.ServiceID;
+            var meta = serviceInfo.Metadata != null
+                ? new Dictionary<string, string>(serviceInfo.Metadata)
+                : new Dictionary<string, string>();
+
             meta["Protocol"] = serviceInfo.ServiceProtocol.ToString();
             if (!string.IsNullOrEmpty(serviceInfo.Version))
                 meta["Version"] = serviceInfo.Version;
@@ -159,12 +148,8 @@ namespace SyZero.Consul
                 meta["Region"] = serviceInfo.Region;
             if (!string.IsNullOrEmpty(serviceInfo.Zone))
                 meta["Zone"] = serviceInfo.Zone;
-            meta["Weight"] = serviceInfo.Weight.ToString();
-            meta["RegisterTime"] = (serviceInfo.RegisterTime != default ? serviceInfo.RegisterTime : DateTime.UtcNow).ToString("O");
-
-            var healthCheckUrl = !string.IsNullOrEmpty(serviceInfo.HealthCheckUrl)
-                ? serviceInfo.HealthCheckUrl
-                : $"{serviceInfo.ServiceProtocol.ToString().ToLower()}://{serviceInfo.ServiceAddress}:{serviceInfo.ServicePort}/health";
+            meta["Weight"] = GetNormalizedWeight(serviceInfo.Weight).ToString(CultureInfo.InvariantCulture);
+            meta["RegisterTime"] = (serviceInfo.RegisterTime != default ? serviceInfo.RegisterTime : DateTime.UtcNow).ToString("O", CultureInfo.InvariantCulture);
 
             var healthCheckInterval = serviceInfo.HealthCheckIntervalSeconds > 0 
                 ? serviceInfo.HealthCheckIntervalSeconds 
@@ -172,37 +157,63 @@ namespace SyZero.Consul
             var healthCheckTimeout = serviceInfo.HealthCheckTimeoutSeconds > 0 
                 ? serviceInfo.HealthCheckTimeoutSeconds 
                 : 5;
+            var healthCheckUrl = !string.IsNullOrWhiteSpace(serviceInfo.HealthCheckUrl)
+                ? serviceInfo.HealthCheckUrl
+                : BuildHealthCheckUrl(serviceInfo.ServiceProtocol, serviceInfo.ServiceAddress, serviceInfo.ServicePort);
+
+            meta["HealthCheckUrl"] = healthCheckUrl;
+            meta["HealthCheckIntervalSeconds"] = healthCheckInterval.ToString(CultureInfo.InvariantCulture);
+            meta["HealthCheckTimeoutSeconds"] = healthCheckTimeout.ToString(CultureInfo.InvariantCulture);
+
+            var check = new AgentServiceCheck
+            {
+                Interval = TimeSpan.FromSeconds(healthCheckInterval),
+                Timeout = TimeSpan.FromSeconds(healthCheckTimeout),
+                DeregisterCriticalServiceAfter = TimeSpan.FromMinutes(1)
+            };
+
+            if (serviceInfo.ServiceProtocol == ProtocolType.GRPC)
+            {
+                check.GRPC = healthCheckUrl;
+            }
+            else
+            {
+                check.HTTP = healthCheckUrl;
+            }
 
             var registration = new AgentServiceRegistration
             {
-                ID = serviceInfo.ServiceID,
+                ID = serviceId,
                 Name = serviceInfo.ServiceName,
                 Address = serviceInfo.ServiceAddress,
                 Port = serviceInfo.ServicePort,
-                Tags = serviceInfo.Tags?.ToArray(),
+                Tags = serviceInfo.Tags?.ToArray() ?? Array.Empty<string>(),
                 Meta = meta,
-                Check = new AgentServiceCheck
-                {
-                    HTTP = healthCheckUrl,
-                    Interval = TimeSpan.FromSeconds(healthCheckInterval),
-                    Timeout = TimeSpan.FromSeconds(healthCheckTimeout),
-                    DeregisterCriticalServiceAfter = TimeSpan.FromMinutes(1)
-                }
+                Check = check
             };
             var result = await _consulClient.Agent.ServiceRegister(registration);
             if (result.StatusCode != System.Net.HttpStatusCode.OK)
             {
                 throw new Exception($"SyZero.Consul:服务注册失败({result.StatusCode})!");
             }
+
+            InvalidateServiceCache(serviceInfo.ServiceName);
         }
 
         public async Task DeregisterService(string serviceId)
         {
+            if (string.IsNullOrWhiteSpace(serviceId))
+            {
+                throw new ArgumentException("服务 ID 不能为空。", nameof(serviceId));
+            }
+
             var result = await _consulClient.Agent.ServiceDeregister(serviceId);
             if (result.StatusCode != System.Net.HttpStatusCode.OK)
             {
                 throw new Exception($"SyZero.Consul:服务注销失败({result.StatusCode})!");
             }
+
+            InvalidateServiceCache();
         }
 
         #endregion
@@ -221,8 +232,23 @@ namespace SyZero.Consul
 
         public Task Subscribe(string serviceName, Action<List<ServiceInfo>> callback)
         {
+            if (string.IsNullOrWhiteSpace(serviceName))
+            {
+                throw new ArgumentException("服务名称不能为空。", nameof(serviceName));
+            }
+            if (callback == null)
+            {
+                throw new ArgumentNullException(nameof(callback));
+            }
+
             _subscriptions[serviceName] = callback;
-            
+
+            if (_watchTokens.TryRemove(serviceName, out var previousToken))
+            {
+                previousToken.Cancel();
+                previousToken.Dispose();
+            }
+
             var cts = new CancellationTokenSource();
             _watchTokens[serviceName] = cts;
 
@@ -261,42 +287,12 @@ namespace SyZero.Consul
                     if (result.LastIndex != lastIndex)
                     {
                         lastIndex = result.LastIndex;
-                        
+
                         if (_subscriptions.TryGetValue(serviceName, out var callback))
                         {
-                            var services = result.Response.Select(entry =>
-                            {
-                                var service = entry.Service;
-                                var protocolMeta = service.Meta?.FirstOrDefault(meta => meta.Key == "Protocol");
-                                var protocol = ProtocolType.HTTP;
-                                if (protocolMeta.HasValue && !string.IsNullOrEmpty(protocolMeta.Value.Value))
-                                {
-                                    Enum.TryParse(protocolMeta.Value.Value, out protocol);
-                                }
-                                service.Meta.TryGetValue("Version", out var version);
-                                service.Meta.TryGetValue("Group", out var group);
-                                service.Meta.TryGetValue("Region", out var region);
-                                service.Meta.TryGetValue("Zone", out var zone);
-                                double.TryParse(service.Meta.TryGetValue("Weight", out var weightStr) ? weightStr : "1", out var weight);
-                                return new ServiceInfo()
-                                {
-                                    ServiceID = service.ID,
-                                    ServiceName = service.Service,
-                                    ServiceAddress = service.Address,
-                                    ServicePort = service.Port,
-                                    ServiceProtocol = protocol,
-                                    Version = version,
-                                    Group = group,
-                                    Tags = service.Tags?.ToList() ?? new List<string>(),
-                                    Metadata = service.Meta?.ToDictionary(m => m.Key, m => m.Value) ?? new Dictionary<string, string>(),
-                                    IsHealthy = true,
-                                    Enabled = true,
-                                    Weight = weight > 0 ? weight : 1.0,
-                                    Region = region,
-                                    Zone = zone
-                                };
-                            }).ToList();
-                            
+                            InvalidateServiceCache(serviceName);
+                            var services = result.Response.Select(MapServiceEntry).ToList();
+
                             callback?.Invoke(services);
                         }
                     }
@@ -305,12 +301,232 @@ namespace SyZero.Consul
                 {
                     break;
                 }
-                catch (Exception)
+                catch (Exception) when (!cancellationToken.IsCancellationRequested)
                 {
-                    // 发生错误时等待一段时间后重试
-                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
                 }
             }
+        }
+
+        private static ServiceInfo SelectByWeight(List<ServiceInfo> services)
+        {
+            var weightedServices = services.Where(service => service.Weight > 0).ToList();
+            if (weightedServices.Count == 0)
+            {
+                return services[GetRandom().Next(services.Count)];
+            }
+
+            var totalWeight = weightedServices.Sum(service => service.Weight);
+            var randomWeight = GetRandom().NextDouble() * totalWeight;
+            var currentWeight = 0.0;
+            foreach (var service in weightedServices)
+            {
+                currentWeight += service.Weight;
+                if (randomWeight <= currentWeight)
+                {
+                    return service;
+                }
+            }
+
+            return weightedServices.Last();
+        }
+
+        private static ServiceInfo MapCatalogService(CatalogService service)
+        {
+            var metadata = service.ServiceMeta != null
+                ? new Dictionary<string, string>(service.ServiceMeta)
+                : new Dictionary<string, string>();
+            var address = GetServiceAddress(service.ServiceAddress, service.Address);
+
+            return new ServiceInfo
+            {
+                ServiceID = service.ServiceID,
+                ServiceName = service.ServiceName,
+                ServiceAddress = address,
+                ServicePort = service.ServicePort,
+                ServiceProtocol = GetProtocol(metadata),
+                Version = GetMetadataValue(metadata, "Version"),
+                Group = GetMetadataValue(metadata, "Group"),
+                Tags = service.ServiceTags?.ToList() ?? new List<string>(),
+                Metadata = metadata,
+                IsHealthy = true,
+                Enabled = true,
+                Weight = GetWeight(metadata),
+                Region = GetMetadataValue(metadata, "Region"),
+                Zone = GetMetadataValue(metadata, "Zone"),
+                HealthCheckUrl = GetHealthCheckUrl(metadata, GetProtocol(metadata), address, service.ServicePort)
+            };
+        }
+
+        private static ServiceInfo MapServiceEntry(ServiceEntry entry)
+        {
+            var service = entry.Service;
+            var metadata = service.Meta != null
+                ? new Dictionary<string, string>(service.Meta)
+                : new Dictionary<string, string>();
+            var address = GetServiceAddress(service.Address, entry.Node?.Address);
+            var protocol = GetProtocol(metadata);
+
+            return new ServiceInfo
+            {
+                ServiceID = service.ID,
+                ServiceName = service.Service,
+                ServiceAddress = address,
+                ServicePort = service.Port,
+                ServiceProtocol = protocol,
+                Version = GetMetadataValue(metadata, "Version"),
+                Group = GetMetadataValue(metadata, "Group"),
+                Tags = service.Tags?.ToList() ?? new List<string>(),
+                Metadata = metadata,
+                IsHealthy = true,
+                Enabled = true,
+                Weight = GetWeight(metadata),
+                Region = GetMetadataValue(metadata, "Region"),
+                Zone = GetMetadataValue(metadata, "Zone"),
+                HealthCheckUrl = GetHealthCheckUrl(metadata, protocol, address, service.Port),
+                HealthCheckIntervalSeconds = GetIntValue(metadata, "HealthCheckIntervalSeconds", 10),
+                HealthCheckTimeoutSeconds = GetIntValue(metadata, "HealthCheckTimeoutSeconds", 5)
+            };
+        }
+
+        private static List<ServiceInfo> CloneServices(List<ServiceInfo> services)
+        {
+            return services.Select(CloneServiceInfo).ToList();
+        }
+
+        private static ServiceInfo CloneServiceInfo(ServiceInfo service)
+        {
+            return new ServiceInfo
+            {
+                ServiceID = service.ServiceID,
+                ServiceName = service.ServiceName,
+                ServiceAddress = service.ServiceAddress,
+                ServicePort = service.ServicePort,
+                ServiceProtocol = service.ServiceProtocol,
+                Version = service.Version,
+                Group = service.Group,
+                Tags = service.Tags != null ? new List<string>(service.Tags) : new List<string>(),
+                Metadata = service.Metadata != null ? new Dictionary<string, string>(service.Metadata) : new Dictionary<string, string>(),
+                IsHealthy = service.IsHealthy,
+                Enabled = service.Enabled,
+                Weight = service.Weight,
+                RegisterTime = service.RegisterTime,
+                LastHeartbeat = service.LastHeartbeat,
+                HealthCheckUrl = service.HealthCheckUrl,
+                HealthCheckIntervalSeconds = service.HealthCheckIntervalSeconds,
+                HealthCheckTimeoutSeconds = service.HealthCheckTimeoutSeconds,
+                Region = service.Region,
+                Zone = service.Zone
+            };
+        }
+
+        private void InvalidateServiceCache(string serviceName = null)
+        {
+            if (!string.IsNullOrWhiteSpace(serviceName))
+            {
+                _cache.Remove(GetCacheKey(serviceName));
+                return;
+            }
+
+            var cacheKeys = _cache.GetKeys($"{CacheKeyPrefix}*") ?? Array.Empty<string>();
+            foreach (var key in cacheKeys.Where(key => key.StartsWith(CacheKeyPrefix, StringComparison.Ordinal)))
+            {
+                _cache.Remove(key);
+            }
+        }
+
+        private static string GetCacheKey(string serviceName)
+        {
+            return $"{CacheKeyPrefix}{serviceName}";
+        }
+
+        private static string GetServiceAddress(string primaryAddress, string fallbackAddress)
+        {
+            return string.IsNullOrWhiteSpace(primaryAddress) ? fallbackAddress : primaryAddress;
+        }
+
+        private static ProtocolType GetProtocol(IDictionary<string, string> metadata)
+        {
+            var protocolValue = GetMetadataValue(metadata, "Protocol");
+            if (!string.IsNullOrWhiteSpace(protocolValue) && Enum.TryParse(protocolValue, true, out ProtocolType protocol))
+            {
+                return protocol;
+            }
+
+            return ProtocolType.HTTP;
+        }
+
+        private static string GetMetadataValue(IDictionary<string, string> metadata, string key)
+        {
+            if (metadata != null && metadata.TryGetValue(key, out var value))
+            {
+                return value;
+            }
+
+            return null;
+        }
+
+        private static double GetWeight(IDictionary<string, string> metadata)
+        {
+            var weightValue = GetMetadataValue(metadata, "Weight");
+            if (double.TryParse(weightValue, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var weight))
+            {
+                return GetNormalizedWeight(weight);
+            }
+
+            return 1.0;
+        }
+
+        private static double GetNormalizedWeight(double weight)
+        {
+            return weight > 0 ? weight : 1.0;
+        }
+
+        private static int GetIntValue(IDictionary<string, string> metadata, string key, int defaultValue)
+        {
+            var value = GetMetadataValue(metadata, key);
+            return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed > 0
+                ? parsed
+                : defaultValue;
+        }
+
+        private static string GetHealthCheckUrl(IDictionary<string, string> metadata, ProtocolType protocol, string serviceAddress, int servicePort)
+        {
+            var configuredHealthCheck = GetMetadataValue(metadata, "HealthCheckUrl");
+            if (!string.IsNullOrWhiteSpace(configuredHealthCheck))
+            {
+                return configuredHealthCheck;
+            }
+
+            return BuildHealthCheckUrl(protocol, serviceAddress, servicePort);
+        }
+
+        private static string BuildHealthCheckUrl(ProtocolType protocol, string serviceAddress, int servicePort)
+        {
+            if (string.IsNullOrWhiteSpace(serviceAddress) || servicePort <= 0)
+            {
+                return null;
+            }
+
+            if (protocol == ProtocolType.GRPC)
+            {
+                return $"{serviceAddress}:{servicePort}";
+            }
+
+            var scheme = protocol == ProtocolType.HTTPS ? "https" : "http";
+            return $"{scheme}://{serviceAddress}:{servicePort}/health";
+        }
+
+        private static Random GetRandom()
+        {
+            return RandomProvider.Value ?? new Random(Guid.NewGuid().GetHashCode());
         }
 
         #endregion

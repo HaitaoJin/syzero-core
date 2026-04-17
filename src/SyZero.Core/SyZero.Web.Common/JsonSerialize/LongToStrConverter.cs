@@ -1,5 +1,6 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using System;
+using System.Globalization;
 
 namespace SyZero.Web.Common
 {
@@ -10,30 +11,56 @@ namespace SyZero.Web.Common
     {
         public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
         {
-            // 由于CanConvert过滤，数据类型只可能是long或ulong
-            // 统一转换成long类型处理
-            long v = value is ulong ? (long)(ulong)value : (long)value;
-            writer.WriteValue(v.ToString());
+            if (value == null)
+            {
+                writer.WriteNull();
+                return;
+            }
+
+            if (value is ulong unsignedValue)
+            {
+                writer.WriteValue(unsignedValue.ToString(CultureInfo.InvariantCulture));
+                return;
+            }
+
+            writer.WriteValue(Convert.ToInt64(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture));
         }
 
         public override object ReadJson(JsonReader reader, Type objectType, object existingValue,
             JsonSerializer serializer)
         {
-            // 取得读到的字符串
-            string hex = reader.Value as string;
-            if (String.IsNullOrEmpty(hex))
+            if (reader.TokenType == JsonToken.Null)
             {
-                return null;
+                return GetDefaultValue(objectType);
             }
-            // 调用ToInt64扩展将字符串转换成long型
-            long value = hex.ToLong();
-            // 将v转换成实际需要的类型 ulong 或 long(不转换)
-            return typeof(ulong) == objectType ? (object)(ulong)value : value;
+
+            var rawValue = Convert.ToString(reader.Value, CultureInfo.InvariantCulture);
+            if (string.IsNullOrWhiteSpace(rawValue))
+            {
+                return GetDefaultValue(objectType);
+            }
+
+            var targetType = Nullable.GetUnderlyingType(objectType) ?? objectType;
+            if (targetType == typeof(ulong))
+            {
+                if (ulong.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ulongValue))
+                {
+                    return ulongValue;
+                }
+
+                throw new JsonSerializationException($"Cannot convert value '{rawValue}' to UInt64.");
+            }
+
+            if (long.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var longValue))
+            {
+                return longValue;
+            }
+
+            throw new JsonSerializationException($"Cannot convert value '{rawValue}' to Int64.");
         }
 
         public override bool CanConvert(Type objectType)
         {
-            // 只处理long和ulong两种类型的数据
             if (objectType == typeof(Int64?) || objectType == typeof(Int64) || objectType == typeof(UInt64?) || objectType == typeof(UInt64))
             {
                 return true;
@@ -44,6 +71,15 @@ namespace SyZero.Web.Common
             }
         }
 
+        private static object GetDefaultValue(Type objectType)
+        {
+            var targetType = Nullable.GetUnderlyingType(objectType);
+            if (targetType != null)
+            {
+                return null;
+            }
 
+            return objectType == typeof(ulong) ? 0UL : 0L;
+        }
     }
 }

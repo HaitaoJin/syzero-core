@@ -25,9 +25,17 @@ namespace SyZero
         /// <exception cref="ArgumentNullException">options 为 null 时抛出</exception>
         public static IServiceCollection AddConsul(this IServiceCollection services, ConsulServiceOptions options)
         {
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
             if (options == null)
             {
                 throw new ArgumentNullException(nameof(options));
+            }
+            if (string.IsNullOrWhiteSpace(options.ConsulAddress))
+            {
+                throw new ArgumentException("ConsulAddress 不能为空。", nameof(options));
             }
 
             services.AddSingleton(options);
@@ -52,6 +60,11 @@ namespace SyZero
         /// <returns>服务集合</returns>
         public static IServiceCollection AddConsul(this IServiceCollection services, IConfiguration configuration = null, string sectionName = ConsulServiceOptions.SectionName)
         {
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+
             var config = configuration ?? AppConfig.Configuration;
             var options = new ConsulServiceOptions();
             config.GetSection(sectionName).Bind(options);
@@ -68,6 +81,11 @@ namespace SyZero
         /// <returns>服务集合</returns>
         public static IServiceCollection AddConsul(this IServiceCollection services, Action<ConsulServiceOptions> optionsAction, IConfiguration configuration = null, string sectionName = ConsulServiceOptions.SectionName)
         {
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+
             var config = configuration ?? AppConfig.Configuration;
             var options = new ConsulServiceOptions();
             config.GetSection(sectionName).Bind(options);

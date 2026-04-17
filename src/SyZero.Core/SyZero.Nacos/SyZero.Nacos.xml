@@ -14,5 +14,15 @@
             Nacos配置扩展
             </summary>
         </member>
+        <member name="M:SyZero.SyZeroNacosExtension.AddNacos(Microsoft.Extensions.DependencyInjection.IServiceCollection,Microsoft.Extensions.Configuration.IConfiguration,System.String)">
+            <summary>
+            从配置注册 Nacos，并注入 SyZero 的服务管理实现。
+            </summary>
+        </member>
+        <member name="M:SyZero.SyZeroNacosExtension.AddNacos(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{Nacos.AspNetCore.V2.NacosAspNetOptions},Microsoft.Extensions.Configuration.IConfiguration,System.String)">
+            <summary>
+            先从配置绑定，再应用额外委托配置。
+            </summary>
+        </member>
     </members>
 </doc>

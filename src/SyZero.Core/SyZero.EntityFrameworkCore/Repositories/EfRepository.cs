@@ -1,39 +1,46 @@
-﻿using Microsoft.EntityFrameworkCore;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 using SyZero.Domain.Entities;
 using SyZero.Domain.Repository;
 
 namespace SyZero.EntityFrameworkCore.Repositories
 {
+    public class EfRepository<TEntity> : EfRepository<DbContext, TEntity>
+        where TEntity : class, IEntity
+    {
+        public EfRepository(DbContext dbContext) : base(dbContext)
+        {
+        }
+    }
+
     public class EfRepository<TDbContext, TEntity> : IRepository<TEntity>
         where TEntity : class, IEntity
         where TDbContext : DbContext
     {
-        protected TDbContext _dbContext;
-        protected DbSet<TEntity> _dbSet;
+        protected readonly TDbContext _dbContext;
+        protected readonly DbSet<TEntity> _dbSet;
+
         public EfRepository(TDbContext dbContext)
         {
-            _dbContext = dbContext;
+            _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
             _dbSet = _dbContext.Set<TEntity>();
-        }
-        public EfRepository()
-        {
-
         }
 
         #region Count
         public int Count(Expression<Func<TEntity, bool>> where)
         {
-            return _dbSet.LongCount(where).ToInt32();
+            return checked((int)_dbSet.LongCount(where));
         }
 
         public async Task<int> CountAsync(Expression<Func<TEntity, bool>> where, CancellationToken cancellationToken = default(CancellationToken))
         {
-            return (await _dbSet.LongCountAsync(where, cancellationToken)).ToInt32();
+            cancellationToken.ThrowIfCancellationRequested();
+            return checked((int)await _dbSet.LongCountAsync(where, cancellationToken));
         }
         #endregion
 
@@ -41,41 +48,43 @@ namespace SyZero.EntityFrameworkCore.Repositories
         public TEntity Add(TEntity entity)
         {
             var result = _dbSet.Add(entity);
-            if (_dbContext.Database.CurrentTransaction == null)
-            {
-                _dbContext.SaveChanges();
-            }
+            SaveChangesIfNeeded();
             return result.Entity;
         }
 
         public async Task<TEntity> AddAsync(TEntity entity, CancellationToken cancellationToken = default(CancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var newEntity = (await _dbSet.AddAsync(entity, cancellationToken)).Entity;
-            if (_dbContext.Database.CurrentTransaction == null)
-            {
-                _dbContext.SaveChanges();
-            }
+            await SaveChangesIfNeededAsync(cancellationToken);
             return newEntity;
         }
 
         public int AddList(IQueryable<TEntity> entities)
         {
-            _dbSet.AddRange(entities);
-            if (_dbContext.Database.CurrentTransaction == null)
+            var entityList = ToList(entities);
+            if (entityList.Count == 0)
             {
-                _dbContext.SaveChanges();
+                return 0;
             }
-            return 1;
+
+            _dbSet.AddRange(entityList);
+            SaveChangesIfNeeded();
+            return entityList.Count;
         }
 
         public async Task<int> AddListAsync(IQueryable<TEntity> entities, CancellationToken cancellationToken = default(CancellationToken))
         {
-            await _dbSet.AddRangeAsync(entities, cancellationToken);
-            if (_dbContext.Database.CurrentTransaction == null)
+            cancellationToken.ThrowIfCancellationRequested();
+            var entityList = ToList(entities);
+            if (entityList.Count == 0)
             {
-                _dbContext.SaveChanges();
+                return 0;
             }
-            return 1;
+
+            await _dbSet.AddRangeAsync(entityList, cancellationToken);
+            await SaveChangesIfNeededAsync(cancellationToken);
+            return entityList.Count;
         }
         #endregion
 
@@ -83,56 +92,62 @@ namespace SyZero.EntityFrameworkCore.Repositories
         public long Delete(long id)
         {
             var entity = GetModel(id);
-            if (entity == null) return 0;
-            _dbSet.Remove(entity);
-            if (_dbContext.Database.CurrentTransaction == null)
+            if (entity == null)
             {
-                _dbContext.SaveChanges();
+                return 0;
             }
+
+            _dbSet.Remove(entity);
+            SaveChangesIfNeeded();
             return 1;
         }
 
         public long Delete(Expression<Func<TEntity, bool>> where)
         {
-            var query = GetList(where);
-            if (query == null || !query.Any()) return 0;
-            _dbSet.RemoveRange(query);
-            if (_dbContext.Database.CurrentTransaction == null)
+            var entities = _dbSet.Where(where).ToList();
+            if (entities.Count == 0)
             {
-                _dbContext.SaveChanges();
+                return 0;
             }
-            return 1;
+
+            _dbSet.RemoveRange(entities);
+            SaveChangesIfNeeded();
+            return entities.Count;
         }
 
         public async Task<long> DeleteAsync(long id, CancellationToken cancellationToken = default(CancellationToken))
         {
-            var entity = await GetModelAsync(id);
-            if (entity == null) return 0;
-            _dbSet.Remove(entity);
-            if (_dbContext.Database.CurrentTransaction == null)
+            cancellationToken.ThrowIfCancellationRequested();
+            var entity = await GetModelAsync(id, cancellationToken);
+            if (entity == null)
             {
-                _dbContext.SaveChanges();
+                return 0;
             }
+
+            _dbSet.Remove(entity);
+            await SaveChangesIfNeededAsync(cancellationToken);
             return 1;
         }
 
         public async Task<long> DeleteAsync(Expression<Func<TEntity, bool>> where, CancellationToken cancellationToken = default(CancellationToken))
         {
-            var list = await GetListAsync(where);
-            if (list == null) return 0;
-            _dbSet.RemoveRange(list);
-            if (_dbContext.Database.CurrentTransaction == null)
+            cancellationToken.ThrowIfCancellationRequested();
+            var entities = await _dbSet.Where(where).ToListAsync(cancellationToken);
+            if (entities.Count == 0)
             {
-                _dbContext.SaveChanges();
+                return 0;
             }
-            return 1;
+
+            _dbSet.RemoveRange(entities);
+            await SaveChangesIfNeededAsync(cancellationToken);
+            return entities.Count;
         }
         #endregion
 
         #region Select
         public IQueryable<TEntity> GetList()
         {
-            return _dbSet.Where(p => true);
+            return _dbSet.AsQueryable();
         }
 
         public IQueryable<TEntity> GetList(Expression<Func<TEntity, bool>> where)
@@ -140,14 +155,16 @@ namespace SyZero.EntityFrameworkCore.Repositories
             return _dbSet.Where(where);
         }
 
-        public async Task<IQueryable<TEntity>> GetListAsync(CancellationToken cancellationToken = default(CancellationToken))
+        public Task<IQueryable<TEntity>> GetListAsync(CancellationToken cancellationToken = default(CancellationToken))
         {
-            return await GetListAsync(p => true, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(GetList());
         }
 
-        public async Task<IQueryable<TEntity>> GetListAsync(Expression<Func<TEntity, bool>> where, CancellationToken cancellationToken = default(CancellationToken))
+        public Task<IQueryable<TEntity>> GetListAsync(Expression<Func<TEntity, bool>> where, CancellationToken cancellationToken = default(CancellationToken))
         {
-            return await GetListAsync(where, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(GetList(where));
         }
 
         public TEntity GetModel(long id)
@@ -157,8 +174,8 @@ namespace SyZero.EntityFrameworkCore.Repositories
 
         public async Task<TEntity> GetModelAsync(long id, CancellationToken cancellationToken = default(CancellationToken))
         {
-            return await _dbSet.FindAsync(id);
-
+            cancellationToken.ThrowIfCancellationRequested();
+            return await _dbSet.FindAsync(new object[] { id }, cancellationToken);
         }
 
         public TEntity GetModel(Expression<Func<TEntity, bool>> where)
@@ -168,78 +185,106 @@ namespace SyZero.EntityFrameworkCore.Repositories
 
         public async Task<TEntity> GetModelAsync(Expression<Func<TEntity, bool>> where, CancellationToken cancellationToken = default(CancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             return await _dbSet.FirstOrDefaultAsync(where, cancellationToken);
         }
 
         public IQueryable<TEntity> GetPaged(int pageIndex, int pageSize, Expression<Func<TEntity, object>> sortBy, bool isDesc = false)
         {
             if (isDesc)
+            {
                 return _dbSet.OrderByDescending(sortBy).Skip((pageIndex - 1) * pageSize).Take(pageSize);
+            }
+
             return _dbSet.OrderBy(sortBy).Skip((pageIndex - 1) * pageSize).Take(pageSize);
         }
 
-        public async Task<IQueryable<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, object>> sortBy, bool isDesc = false, CancellationToken cancellationToken = default(CancellationToken))
+        public Task<IQueryable<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, object>> sortBy, bool isDesc = false, CancellationToken cancellationToken = default(CancellationToken))
         {
-            return await Task.Run(() => GetPaged(pageIndex, pageSize, sortBy, isDesc), cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(GetPaged(pageIndex, pageSize, sortBy, isDesc));
         }
 
         public IQueryable<TEntity> GetPaged(int pageIndex, int pageSize, Expression<Func<TEntity, object>> sortBy, Expression<Func<TEntity, bool>> where, bool isDesc = false)
         {
             if (isDesc)
+            {
                 return _dbSet.Where(where).OrderByDescending(sortBy).Skip((pageIndex - 1) * pageSize).Take(pageSize);
+            }
+
             return _dbSet.Where(where).OrderBy(sortBy).Skip((pageIndex - 1) * pageSize).Take(pageSize);
         }
 
-        public async Task<IQueryable<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, object>> sortBy, Expression<Func<TEntity, bool>> where, bool isDesc = false, CancellationToken cancellationToken = default(CancellationToken))
+        public Task<IQueryable<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, object>> sortBy, Expression<Func<TEntity, bool>> where, bool isDesc = false, CancellationToken cancellationToken = default(CancellationToken))
         {
-            return await Task.Run(() => GetPaged(pageIndex, pageSize, sortBy, where, isDesc), cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(GetPaged(pageIndex, pageSize, sortBy, where, isDesc));
         }
         #endregion
 
-        #region Updata
+        #region Update
         public long Update(TEntity entity)
         {
             _dbSet.Update(entity);
-            if (_dbContext.Database.CurrentTransaction == null)
-            {
-                _dbContext.SaveChanges();
-            }
+            SaveChangesIfNeeded();
             return 1;
         }
 
         public long Update(IQueryable<TEntity> entitys)
         {
-            _dbSet.UpdateRange(entitys);
-            if (_dbContext.Database.CurrentTransaction == null)
+            var entityList = ToList(entitys);
+            if (entityList.Count == 0)
             {
-                _dbContext.SaveChanges();
+                return 0;
             }
-            return 1;
+
+            _dbSet.UpdateRange(entityList);
+            SaveChangesIfNeeded();
+            return entityList.Count;
         }
 
         public async Task<long> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default(CancellationToken))
         {
-            await Task.Run(() => Update(entity), cancellationToken);
-            if (_dbContext.Database.CurrentTransaction == null)
-            {
-                _dbContext.SaveChanges();
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            _dbSet.Update(entity);
+            await SaveChangesIfNeededAsync(cancellationToken);
             return 1;
         }
 
         public async Task<long> UpdateAsync(IQueryable<TEntity> entitys, CancellationToken cancellationToken = default(CancellationToken))
         {
-            await Task.Run(() => Update(entitys), cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var entityList = ToList(entitys);
+            if (entityList.Count == 0)
+            {
+                return 0;
+            }
+
+            _dbSet.UpdateRange(entityList);
+            await SaveChangesIfNeededAsync(cancellationToken);
+            return entityList.Count;
+        }
+        #endregion
+
+        private void SaveChangesIfNeeded()
+        {
             if (_dbContext.Database.CurrentTransaction == null)
             {
                 _dbContext.SaveChanges();
             }
-            return 1;
         }
-        #endregion
 
+        private async Task SaveChangesIfNeededAsync(CancellationToken cancellationToken)
+        {
+            if (_dbContext.Database.CurrentTransaction == null)
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+        }
+
+        private static List<TEntity> ToList(IQueryable<TEntity> entities)
+        {
+            return entities?.ToList() ?? new List<TEntity>();
+        }
     }
-
-
 }
-

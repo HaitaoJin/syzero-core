@@ -66,7 +66,7 @@ namespace SyZero.Web.Common
             request.AddHeader("Content-Type", "application/json");
             var jsonSetting = new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore };
             var json = JsonConvert.SerializeObject(info, Formatting.Indented, jsonSetting);
-            request.AddJsonBody(json);
+            request.AddStringBody(json, DataFormat.Json);
             var result = await RestHelper.ExecuteAsync<WxOpenJsonResult>(request);
             return result;
         }
@@ -82,7 +82,7 @@ namespace SyZero.Web.Common
             request.AddHeader("Content-Type", "application/json");
             var jsonSetting = new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore };
             var json = JsonConvert.SerializeObject(info, Formatting.Indented, jsonSetting);
-            request.AddJsonBody(json);
+            request.AddStringBody(json, DataFormat.Json);
             var result = await RestHelper.ExecuteAsync<WxOpenJsonResult>(request);
             return result;
         }

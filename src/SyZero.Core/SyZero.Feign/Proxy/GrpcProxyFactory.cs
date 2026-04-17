@@ -1,6 +1,9 @@
 using Grpc.Net.Client;
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using SyZero.Serialization;
 
 namespace SyZero.Feign.Proxy
@@ -119,7 +122,7 @@ namespace SyZero.Feign.Proxy
             if (clientType != null) return clientType;
 
             // 格式3: 遍历程序集查找匹配的客户端类型
-            foreach (var type in assembly.GetTypes())
+            foreach (var type in GetLoadableTypes(assembly))
             {
                 if (type.Name == $"{serviceName}Client" || type.Name.EndsWith($".{serviceName}Client"))
                 {
@@ -132,7 +135,7 @@ namespace SyZero.Feign.Proxy
             {
                 try
                 {
-                    foreach (var type in asm.GetTypes())
+                    foreach (var type in GetLoadableTypes(asm))
                     {
                         if (type.Name == $"{serviceName}Client" && type.IsClass && !type.IsAbstract)
                         {
@@ -147,6 +150,18 @@ namespace SyZero.Feign.Proxy
             }
 
             return null;
+        }
+
+        private static IEnumerable<Type> GetLoadableTypes(Assembly assembly)
+        {
+            try
+            {
+                return assembly.GetTypes();
+            }
+            catch (ReflectionTypeLoadException ex)
+            {
+                return ex.Types.Where(type => type != null);
+            }
         }
 
         /// <summary>

@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Reflection;
 using SyZero.Application.Attributes;
 using SyZero.Application.Service;
@@ -35,6 +37,11 @@ namespace SyZero.DynamicGrpc
         /// <returns>如果类型是有效的动态 gRPC 服务则返回 true</returns>
         public bool IsGrpcService(TypeInfo typeInfo)
         {
+            if (typeInfo == null)
+            {
+                throw new ArgumentNullException(nameof(typeInfo));
+            }
+
             var type = typeInfo.AsType();
             return _serviceCache.GetOrAdd(type, t => IsValidDynamicGrpcService(typeInfo));
         }
@@ -69,6 +76,12 @@ namespace SyZero.DynamicGrpc
                 return false;
             }
 
+            // 不能有 NonGrpcServiceAttribute 排除标记
+            if (ReflectionHelper.GetSingleAttributeOrDefaultByFullSearch<Attributes.NonGrpcServiceAttribute>(typeInfo) != null)
+            {
+                return false;
+            }
+
             return true;
         }
 
@@ -79,6 +92,7 @@ namespace SyZero.DynamicGrpc
         {
             return typeof(IDynamicApi).IsAssignableFrom(typeInfo.AsType()) &&
                    typeInfo.IsPublic &&
+                   typeInfo.IsClass &&
                    !typeInfo.IsAbstract &&
                    !typeInfo.IsGenericType;
         }
@@ -101,7 +115,7 @@ namespace SyZero.DynamicGrpc
                 return _options.GetServiceName(serviceName);
             }
 
-            foreach (var postfix in _options.RemoveServicePostfixes)
+            foreach (var postfix in GetOrderedPostfixes(_options.RemoveServicePostfixes))
             {
                 if (serviceName.EndsWith(postfix, StringComparison.OrdinalIgnoreCase))
                 {
@@ -130,7 +144,7 @@ namespace SyZero.DynamicGrpc
                 return _options.GetMethodName(methodName);
             }
 
-            foreach (var postfix in _options.RemoveMethodPostfixes)
+            foreach (var postfix in GetOrderedPostfixes(_options.RemoveMethodPostfixes))
             {
                 if (methodName.EndsWith(postfix, StringComparison.OrdinalIgnoreCase))
                 {
@@ -147,6 +161,14 @@ namespace SyZero.DynamicGrpc
         public static void ClearCache()
         {
             _serviceCache.Clear();
+        }
+
+        private static IEnumerable<string> GetOrderedPostfixes(IEnumerable<string> postfixes)
+        {
+            return postfixes
+                .Where(postfix => !string.IsNullOrWhiteSpace(postfix))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(postfix => postfix.Length);
         }
     }
 }

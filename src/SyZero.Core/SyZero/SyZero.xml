@@ -2814,6 +2814,13 @@
             Autofac依赖注入静态服务
             </summary>
         </member>
+        <member name="M:SyZero.Util.SyZeroUtil.BeginScope(System.IServiceProvider)">
+            <summary>
+            设置当前异步上下文中的作用域服务提供者
+            </summary>
+            <param name="serviceProvider"></param>
+            <returns></returns>
+        </member>
         <member name="M:SyZero.Util.SyZeroUtil.GetService``1">
             <summary>
             获取服务(Single)

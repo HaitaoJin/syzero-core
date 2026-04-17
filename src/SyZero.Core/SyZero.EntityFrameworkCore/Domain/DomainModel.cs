@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+using System;
+using Microsoft.EntityFrameworkCore;
 using SyZero.Domain.Entities;
 using SyZero.Domain.Model;
 using SyZero.EntityFrameworkCore.Repositories;
@@ -15,12 +16,9 @@ namespace SyZero.EntityFrameworkCore.Domain
         where TEntity : class, IEntity
         where TDbContext : DbContext
     {
-
         public DomainModel()
+            : base(SyZeroUtil.GetScopeService<TDbContext>() ?? throw new InvalidOperationException($"未能解析 {typeof(TDbContext).FullName}。"))
         {
-            _dbContext = SyZeroUtil.GetScopeService<TDbContext>();
-            _dbSet = _dbContext.Set<TEntity>();
         }
-
     }
 }

@@ -30,13 +30,13 @@ jobs:
           dotnet-version: 9.0.x
 
       - name: Restore dependencies
-        run: dotnet restore ./src/SyZero.sln
+        run: dotnet restore ./SyZero.slnx
 
       - name: Build
-        run: dotnet build --configuration Release ./src/SyZero.sln --no-restore
+        run: dotnet build --configuration Release ./SyZero.slnx --no-restore
 
       - name: Create the package
-        run: dotnet pack --configuration Release ./src/SyZero.sln --no-restore
+        run: dotnet pack --configuration Release ./SyZero.slnx --no-restore
 
       - name: Upload package
         uses: actions/upload-artifact@v4
@@ -62,7 +62,7 @@ jobs:
         if: github.ref_name == 'master' || github.ref_name == 'dev'
         with:
           artifacts: "./nuget/*.nupkg"
-          bodyFile: 'ReleaseNote.md'
+          body: ${{ steps.get_releasenote.outputs.body }}
           token: ${{ env.GB_NUGET_TOKEN }}
           prerelease: ${{ github.ref_name != 'master' }}
           tag: v${{ env.BUILD_BUILDNUMBER }}

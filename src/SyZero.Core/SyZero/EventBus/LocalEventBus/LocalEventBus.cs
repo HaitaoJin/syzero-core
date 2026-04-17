@@ -25,6 +25,7 @@ namespace SyZero.EventBus.LocalEventBus
         private readonly string _subscriptionFilePath;
         private readonly string _eventFilePath;
         private readonly string _deadLetterFilePath;
+        private readonly object _subscriptionLock = new object();
         private readonly object _fileLock = new object();
         private FileSystemWatcher _subscriptionWatcher;
         private FileSystemWatcher _eventWatcher;
@@ -59,16 +60,7 @@ namespace SyZero.EventBus.LocalEventBus
             if (_options.EnableAsync)
             {
                 _processTimer = new Timer(
-                    _ => {
-                        try
-                        {
-                            ProcessEventsAsync().GetAwaiter().GetResult();
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"SyZero.EventBus: 事件处理定时器异常: {ex.Message}");
-                        }
-                    },
+                    _ => RunBackgroundTask(ProcessEventsAsync, "事件处理定时器"),
                     null,
                     TimeSpan.FromSeconds(1),
                     TimeSpan.FromSeconds(1));
@@ -78,16 +70,7 @@ namespace SyZero.EventBus.LocalEventBus
             if (_options.AutoCleanExpiredEvents)
             {
                 _cleanupTimer = new Timer(
-                    _ => {
-                        try
-                        {
-                            CleanExpiredEventsAsync().GetAwaiter().GetResult();
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"SyZero.EventBus: 清理定时器异常: {ex.Message}");
-                        }
-                    },
+                    _ => RunBackgroundTask(CleanExpiredEventsAsync, "清理定时器"),
                     null,
                     TimeSpan.FromSeconds(_options.AutoCleanIntervalSeconds),
                     TimeSpan.FromSeconds(_options.AutoCleanIntervalSeconds));
@@ -111,19 +94,23 @@ namespace SyZero.EventBus.LocalEventBus
 
         private void DoSubscribe(Type handlerType, string eventName, Func<object> handlerFactory)
         {
-            if (!_subscriptions.ContainsKey(eventName))
+            lock (_subscriptionLock)
             {
-                _subscriptions[eventName] = new List<Type>();
-            }
+                if (!_subscriptions.TryGetValue(eventName, out var handlers))
+                {
+                    handlers = new List<Type>();
+                    _subscriptions[eventName] = handlers;
+                }
 
-            if (_subscriptions[eventName].Contains(handlerType))
-            {
-                Console.WriteLine($"SyZero.EventBus: 事件处理器 {handlerType.Name} 已订阅事件 {eventName}");
-                return;
-            }
+                if (handlers.Contains(handlerType))
+                {
+                    Console.WriteLine($"SyZero.EventBus: 事件处理器 {handlerType.Name} 已订阅事件 {eventName}");
+                    return;
+                }
 
-            _subscriptions[eventName].Add(handlerType);
-            _handlerFactories[$"{eventName}_{handlerType.Name}"] = handlerFactory;
+                handlers.Add(handlerType);
+                _handlerFactories[$"{eventName}_{handlerType.Name}"] = handlerFactory;
+            }
 
             Console.WriteLine($"SyZero.EventBus: 事件处理器 {handlerType.Name} 订阅事件 {eventName}");
 
@@ -135,18 +122,22 @@ namespace SyZero.EventBus.LocalEventBus
 
         private void DoSubscribeDynamic(Type handlerType, string eventName)
         {
-            if (!_dynamicSubscriptions.ContainsKey(eventName))
+            lock (_subscriptionLock)
             {
-                _dynamicSubscriptions[eventName] = new List<Type>();
-            }
+                if (!_dynamicSubscriptions.TryGetValue(eventName, out var handlers))
+                {
+                    handlers = new List<Type>();
+                    _dynamicSubscriptions[eventName] = handlers;
+                }
 
-            if (_dynamicSubscriptions[eventName].Contains(handlerType))
-            {
-                Console.WriteLine($"SyZero.EventBus: 动态事件处理器 {handlerType.Name} 已订阅事件 {eventName}");
-                return;
-            }
+                if (handlers.Contains(handlerType))
+                {
+                    Console.WriteLine($"SyZero.EventBus: 动态事件处理器 {handlerType.Name} 已订阅事件 {eventName}");
+                    return;
+                }
 
-            _dynamicSubscriptions[eventName].Add(handlerType);
+                handlers.Add(handlerType);
+            }
 
             Console.WriteLine($"SyZero.EventBus: 动态事件处理器 {handlerType.Name} 订阅事件 {eventName}");
 
@@ -162,21 +153,24 @@ namespace SyZero.EventBus.LocalEventBus
             var eventName = GetEventKey<T>();
             var handlerType = typeof(TH);
 
-            if (_subscriptions.ContainsKey(eventName))
+            lock (_subscriptionLock)
             {
-                _subscriptions[eventName].Remove(handlerType);
-                _handlerFactories.TryRemove($"{eventName}_{handlerType.Name}", out _);
-
-                if (_subscriptions[eventName].Count == 0)
+                if (_subscriptions.TryGetValue(eventName, out var handlers))
                 {
-                    _subscriptions.TryRemove(eventName, out _);
-                }
+                    handlers.Remove(handlerType);
+                    _handlerFactories.TryRemove($"{eventName}_{handlerType.Name}", out _);
 
-                Console.WriteLine($"SyZero.EventBus: 事件处理器 {handlerType.Name} 取消订阅事件 {eventName}");
+                    if (handlers.Count == 0)
+                    {
+                        _subscriptions.TryRemove(eventName, out _);
+                    }
 
-                if (_options.EnableFilePersistence)
-                {
-                    SaveSubscriptionsToFile();
+                    Console.WriteLine($"SyZero.EventBus: 事件处理器 {handlerType.Name} 取消订阅事件 {eventName}");
+
+                    if (_options.EnableFilePersistence)
+                    {
+                        SaveSubscriptionsToFile();
+                    }
                 }
             }
         }
@@ -186,29 +180,35 @@ namespace SyZero.EventBus.LocalEventBus
         {
             var handlerType = typeof(TH);
 
-            if (_dynamicSubscriptions.ContainsKey(eventName))
+            lock (_subscriptionLock)
             {
-                _dynamicSubscriptions[eventName].Remove(handlerType);
-
-                if (_dynamicSubscriptions[eventName].Count == 0)
+                if (_dynamicSubscriptions.TryGetValue(eventName, out var handlers))
                 {
-                    _dynamicSubscriptions.TryRemove(eventName, out _);
-                }
+                    handlers.Remove(handlerType);
 
-                Console.WriteLine($"SyZero.EventBus: 动态事件处理器 {handlerType.Name} 取消订阅事件 {eventName}");
+                    if (handlers.Count == 0)
+                    {
+                        _dynamicSubscriptions.TryRemove(eventName, out _);
+                    }
 
-                if (_options.EnableFilePersistence)
-                {
-                    SaveSubscriptionsToFile();
+                    Console.WriteLine($"SyZero.EventBus: 动态事件处理器 {handlerType.Name} 取消订阅事件 {eventName}");
+
+                    if (_options.EnableFilePersistence)
+                    {
+                        SaveSubscriptionsToFile();
+                    }
                 }
             }
         }
 
         public void Clear()
         {
-            _subscriptions.Clear();
-            _dynamicSubscriptions.Clear();
-            _handlerFactories.Clear();
+            lock (_subscriptionLock)
+            {
+                _subscriptions.Clear();
+                _dynamicSubscriptions.Clear();
+                _handlerFactories.Clear();
+            }
 
             Console.WriteLine("SyZero.EventBus: 清空所有订阅");
 
@@ -226,21 +226,27 @@ namespace SyZero.EventBus.LocalEventBus
 
         public bool IsSubscribed(string eventName)
         {
-            return _subscriptions.ContainsKey(eventName) || _dynamicSubscriptions.ContainsKey(eventName);
+            lock (_subscriptionLock)
+            {
+                return _subscriptions.ContainsKey(eventName) || _dynamicSubscriptions.ContainsKey(eventName);
+            }
         }
 
         public IEnumerable<string> GetSubscribedEvents()
         {
-            var events = new HashSet<string>();
-            foreach (var key in _subscriptions.Keys)
+            lock (_subscriptionLock)
             {
-                events.Add(key);
+                var events = new HashSet<string>();
+                foreach (var key in _subscriptions.Keys)
+                {
+                    events.Add(key);
+                }
+                foreach (var key in _dynamicSubscriptions.Keys)
+                {
+                    events.Add(key);
+                }
+                return events.ToArray();
             }
-            foreach (var key in _dynamicSubscriptions.Keys)
-            {
-                events.Add(key);
-            }
-            return events;
         }
 
         #endregion
@@ -311,7 +317,7 @@ namespace SyZero.EventBus.LocalEventBus
             else
             {
                 // 同步模式：立即处理
-                ProcessEvent(eventName, eventData);
+                RunSync(() => ProcessEventAsync(eventName, eventData));
             }
         }
 
@@ -330,115 +336,27 @@ namespace SyZero.EventBus.LocalEventBus
 
         #region 事件处理
 
-        private void ProcessEvent(string eventName, object eventData)
-        {
-            // 处理普通订阅
-            if (_subscriptions.ContainsKey(eventName))
-            {
-                var handlers = _subscriptions[eventName];
-                foreach (var handlerType in handlers.ToList())
-                {
-                    try
-                    {
-                        var factoryKey = $"{eventName}_{handlerType.Name}";
-                        if (_handlerFactories.TryGetValue(factoryKey, out var factory))
-                        {
-                            var handler = factory();
-                            var concreteType = typeof(IEventHandler<>).MakeGenericType(eventData.GetType());
-                            var method = concreteType.GetMethod("HandleAsync");
-                            method?.Invoke(handler, new[] { eventData });
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"SyZero.EventBus: 处理事件 {eventName} 时发生错误: {ex.Message}");
-                    }
-                }
-            }
-
-            // 处理动态订阅
-            if (_dynamicSubscriptions.ContainsKey(eventName))
-            {
-                var handlers = _dynamicSubscriptions[eventName];
-                foreach (var handlerType in handlers.ToList())
-                {
-                    try
-                    {
-                        var handler = Activator.CreateInstance(handlerType) as IDynamicEventHandler;
-                        if (handler != null)
-                        {
-                            handler.HandleAsync(eventName, eventData).Wait();
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"SyZero.EventBus: 处理动态事件 {eventName} 时发生错误: {ex.Message}");
-                    }
-                }
-            }
-        }
-
         private async Task ProcessEventAsync(string eventName, object eventData)
         {
             var tasks = new List<Task>();
 
             // 处理普通订阅
-            if (_subscriptions.ContainsKey(eventName))
+            var handlers = GetTypedHandlers(eventName);
+            if (handlers.Count > 0)
             {
-                var handlers = _subscriptions[eventName];
-                foreach (var handlerType in handlers.ToList())
+                foreach (var handlerType in handlers)
                 {
-                    var task = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            var factoryKey = $"{eventName}_{handlerType.Name}";
-                            if (_handlerFactories.TryGetValue(factoryKey, out var factory))
-                            {
-                                var handler = factory();
-                                var concreteType = typeof(IEventHandler<>).MakeGenericType(eventData.GetType());
-                                var method = concreteType.GetMethod("HandleAsync");
-                                if (method != null)
-                                {
-                                    var result = method.Invoke(handler, new[] { eventData });
-                                    if (result is Task taskResult)
-                                    {
-                                        await taskResult;
-                                    }
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"SyZero.EventBus: 异步处理事件 {eventName} 时发生错误: {ex.Message}");
-                        }
-                    });
-                    tasks.Add(task);
+                    tasks.Add(InvokeTypedHandlerAsync(eventName, eventData, handlerType));
                 }
             }
 
             // 处理动态订阅
-            if (_dynamicSubscriptions.ContainsKey(eventName))
+            var dynamicHandlers = GetDynamicHandlers(eventName);
+            if (dynamicHandlers.Count > 0)
             {
-                var handlers = _dynamicSubscriptions[eventName];
-                foreach (var handlerType in handlers.ToList())
+                foreach (var handlerType in dynamicHandlers)
                 {
-                    var task = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            var handler = Activator.CreateInstance(handlerType) as IDynamicEventHandler;
-                            if (handler != null)
-                            {
-                                await handler.HandleAsync(eventName, eventData);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"SyZero.EventBus: 异步处理动态事件 {eventName} 时发生错误: {ex.Message}");
-                        }
-                    });
-                    tasks.Add(task);
+                    tasks.Add(InvokeDynamicHandlerAsync(eventName, eventData, handlerType));
                 }
             }
 
@@ -451,10 +369,7 @@ namespace SyZero.EventBus.LocalEventBus
             {
                 try
                 {
-                    using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_options.EventHandlerTimeoutSeconds)))
-                    {
-                        await ProcessEventAsync(wrapper.EventName, wrapper.EventData);
-                    }
+                    await ExecuteWithTimeoutAsync(() => ProcessEventAsync(wrapper.EventName, wrapper.EventData));
                 }
                 catch (Exception ex)
                 {
@@ -530,14 +445,22 @@ namespace SyZero.EventBus.LocalEventBus
                         Directory.CreateDirectory(directory);
                     }
 
+                    Dictionary<string, List<string>> subscriptions;
+                    Dictionary<string, List<string>> dynamicSubscriptions;
+                    lock (_subscriptionLock)
+                    {
+                        subscriptions = _subscriptions.ToDictionary(
+                            kvp => kvp.Key,
+                            kvp => kvp.Value.Select(t => t.FullName).ToList());
+                        dynamicSubscriptions = _dynamicSubscriptions.ToDictionary(
+                            kvp => kvp.Key,
+                            kvp => kvp.Value.Select(t => t.FullName).ToList());
+                    }
+
                     var data = new SubscriptionData
                     {
-                        Subscriptions = _subscriptions.ToDictionary(
-                            kvp => kvp.Key,
-                            kvp => kvp.Value.Select(t => t.FullName).ToList()),
-                        DynamicSubscriptions = _dynamicSubscriptions.ToDictionary(
-                            kvp => kvp.Key,
-                            kvp => kvp.Value.Select(t => t.FullName).ToList())
+                        Subscriptions = subscriptions,
+                        DynamicSubscriptions = dynamicSubscriptions
                     };
 
                     var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
@@ -738,36 +661,33 @@ namespace SyZero.EventBus.LocalEventBus
 
         private async Task CleanExpiredEventsAsync()
         {
-            await Task.Run(() =>
+            try
             {
-                try
+                var expireTime = DateTime.UtcNow.AddSeconds(-_options.EventExpireSeconds);
+                var eventsToKeep = new List<EventWrapper>();
+
+                while (_eventQueue.TryDequeue(out var wrapper))
                 {
-                    var expireTime = DateTime.UtcNow.AddSeconds(-_options.EventExpireSeconds);
-                    var eventsToKeep = new List<EventWrapper>();
-
-                    while (_eventQueue.TryDequeue(out var wrapper))
+                    if (wrapper.CreateTime > expireTime)
                     {
-                        if (wrapper.CreateTime > expireTime)
-                        {
-                            eventsToKeep.Add(wrapper);
-                        }
-                    }
-
-                    foreach (var evt in eventsToKeep)
-                    {
-                        _eventQueue.Enqueue(evt);
-                    }
-
-                    if (_options.EnableFilePersistence)
-                    {
-                        SaveEventsToFile();
+                        eventsToKeep.Add(wrapper);
                     }
                 }
-                catch (Exception ex)
+
+                foreach (var evt in eventsToKeep)
                 {
-                    Console.WriteLine($"SyZero.EventBus: 清理过期事件失败: {ex.Message}");
+                    _eventQueue.Enqueue(evt);
                 }
-            });
+
+                if (_options.EnableFilePersistence)
+                {
+                    SaveEventsToFile();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"SyZero.EventBus: 清理过期事件失败: {ex.Message}");
+            }
         }
 
         #endregion
@@ -779,13 +699,128 @@ namespace SyZero.EventBus.LocalEventBus
             return typeof(T).Name;
         }
 
+        private List<Type> GetTypedHandlers(string eventName)
+        {
+            lock (_subscriptionLock)
+            {
+                return _subscriptions.TryGetValue(eventName, out var handlers)
+                    ? handlers.ToList()
+                    : new List<Type>();
+            }
+        }
+
+        private List<Type> GetDynamicHandlers(string eventName)
+        {
+            lock (_subscriptionLock)
+            {
+                return _dynamicSubscriptions.TryGetValue(eventName, out var handlers)
+                    ? handlers.ToList()
+                    : new List<Type>();
+            }
+        }
+
+        private static Type GetHandlerEventType(Type handlerType)
+        {
+            return handlerType.GetInterfaces()
+                .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEventHandler<>))
+                ?.GetGenericArguments()[0];
+        }
+
+        private static object ConvertEventData(object eventData, Type eventType)
+        {
+            if (eventData == null)
+            {
+                return null;
+            }
+
+            if (eventType.IsInstanceOfType(eventData))
+            {
+                return eventData;
+            }
+
+            return JsonSerializer.Deserialize(JsonSerializer.Serialize(eventData), eventType);
+        }
+
+        private async Task InvokeTypedHandlerAsync(string eventName, object eventData, Type handlerType)
+        {
+            var factoryKey = $"{eventName}_{handlerType.Name}";
+            if (!_handlerFactories.TryGetValue(factoryKey, out var factory))
+            {
+                return;
+            }
+
+            var handler = factory();
+            var handlerEventType = GetHandlerEventType(handlerType);
+            if (handler == null || handlerEventType == null)
+            {
+                return;
+            }
+
+            var concreteType = typeof(IEventHandler<>).MakeGenericType(handlerEventType);
+            var method = concreteType.GetMethod("HandleAsync");
+            var handlerEventData = ConvertEventData(eventData, handlerEventType);
+            if (method?.Invoke(handler, new[] { handlerEventData }) is Task taskResult)
+            {
+                await taskResult;
+            }
+        }
+
+        private static async Task InvokeDynamicHandlerAsync(string eventName, object eventData, Type handlerType)
+        {
+            if (!(Activator.CreateInstance(handlerType) is IDynamicEventHandler handler))
+            {
+                return;
+            }
+
+            await handler.HandleAsync(eventName, eventData);
+        }
+
+        private async Task ExecuteWithTimeoutAsync(Func<Task> taskFactory)
+        {
+            if (_options.EventHandlerTimeoutSeconds <= 0)
+            {
+                await taskFactory();
+                return;
+            }
+
+            var processingTask = taskFactory();
+            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(_options.EventHandlerTimeoutSeconds));
+            var completedTask = await Task.WhenAny(processingTask, timeoutTask);
+            if (completedTask == timeoutTask)
+            {
+                throw new TimeoutException($"事件处理超时（{_options.EventHandlerTimeoutSeconds}秒）");
+            }
+
+            await processingTask;
+        }
+
+        private static void RunSync(Func<Task> taskFactory)
+        {
+            taskFactory().ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+
+        private static void RunBackgroundTask(Func<Task> taskFactory, string operationName)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await taskFactory();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"SyZero.EventBus: {operationName}异常: {ex.Message}");
+                }
+            });
+        }
+
         #endregion
 
         #region IDisposable
 
         public void Dispose()
         {
-            DisposeAsync().GetAwaiter().GetResult();
+            RunSync(async () => await DisposeAsync());
         }
 
         #endregion

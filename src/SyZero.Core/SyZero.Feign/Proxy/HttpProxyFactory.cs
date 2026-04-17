@@ -2,6 +2,7 @@ using Newtonsoft.Json;
 using Refit;
 using System;
 using System.Net.Http;
+using System.Threading.Tasks;
 using SyZero.Client;
 using SyZero.Serialization;
 using SyZero.Web.Common;
@@ -26,7 +27,7 @@ namespace SyZero.Feign.Proxy
             try
             {
                 var httpClient = CreateHttpClient(endPoint, feignService);
-                var settings = CreateRefitSettings(feignService, jsonSerialize);
+                var settings = CreateRefitSettings(jsonSerialize);
                 return RestService.For(targetType, httpClient, settings);
             }
             catch (Exception ex)
@@ -53,14 +54,14 @@ namespace SyZero.Feign.Proxy
         /// <summary>
         /// 创建 Refit 设置
         /// </summary>
-        private RefitSettings CreateRefitSettings(FeignService feignService, IJsonSerialize jsonSerialize)
+        private RefitSettings CreateRefitSettings(IJsonSerialize jsonSerialize)
         {
             return new RefitSettings
             {
                 DeserializationExceptionFactory = (httpResponse, exception) =>
                 {
                     Console.WriteLine($"Feign 反序列化错误: {exception.Message}");
-                    return null;
+                    return Task.FromResult<Exception>(new InvalidOperationException("Feign 响应反序列化失败。", exception));
                 },
                 ContentSerializer = new NewtonsoftJsonContentSerializer(
                     new JsonSerializerSettings
@@ -70,13 +71,23 @@ namespace SyZero.Feign.Proxy
                 ),
                 ExceptionFactory = async (httpResponse) =>
                 {
+                    var jsonString = httpResponse.Content == null
+                        ? string.Empty
+                        : await httpResponse.Content.ReadAsStringAsync();
+
                     if (httpResponse.StatusCode == System.Net.HttpStatusCode.InternalServerError)
                     {
-                        var jsonString = await httpResponse.Content.ReadAsStringAsync();
                         var data = jsonSerialize.JSONToObject<SyMessageBoxModel>(jsonString);
-                        return new SyMessageException(data);
+                        if (data != null)
+                        {
+                            return new SyMessageException(data);
+                        }
                     }
-                    return null;
+
+                    return new HttpRequestException(
+                        $"Feign 请求失败，状态码: {(int)httpResponse.StatusCode} ({httpResponse.StatusCode})。",
+                        null,
+                        httpResponse.StatusCode);
                 }
             };
         }

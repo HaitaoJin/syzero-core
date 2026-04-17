@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <GenerateSwaggerJsonOnBuild Condition="'$(GenerateSwaggerJsonOnBuild)' == '' and '$(UsingMicrosoftNETSdkWeb)' == 'true'">true</GenerateSwaggerJsonOnBuild>
+    <GenerateSwaggerJsonOnBuild Condition="'$(GenerateSwaggerJsonOnBuild)' == ''">false</GenerateSwaggerJsonOnBuild>
+  </PropertyGroup>
+</Project>

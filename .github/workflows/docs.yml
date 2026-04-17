@@ -7,7 +7,7 @@ on:
       - "docs/**"
       - ".github/workflows/docs.yml"
       - "README.md"
-      - "Directory.build.props"
+      - "Directory.Build.props"
   workflow_dispatch:
 
 permissions:

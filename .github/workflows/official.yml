@@ -15,17 +15,17 @@ env:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup BuildNumber
         id: setup_buildnumber
-        run: .\.github\workflows\script\set-buildnumber.ps1 -refName ${{ github.ref_name }}
-        shell: powershell
+        run: ./.github/workflows/script/set-buildnumber.ps1 -refName ${{ github.ref_name }}
+        shell: pwsh
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v3
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 9.0.x
 
@@ -44,11 +44,12 @@ jobs:
           name: build
           path: |
             ./nuget/*.nupkg
+            ./nuget/*.snupkg
 
       - name: Get Release Note
         id: get_releasenote
-        run: .\.github\workflows\script\get-releasenote.ps1 -version ${{ env.BUILD_BUILDNUMBER }}
-        shell: powershell
+        run: ./.github/workflows/script/get-releasenote.ps1 -version ${{ env.BUILD_BUILDNUMBER }}
+        shell: pwsh
 
       - name: Tag commit
         if: github.ref_name == 'master' || github.ref_name == 'dev'
@@ -61,7 +62,8 @@ jobs:
         uses: ncipollo/release-action@v1
         if: github.ref_name == 'master' || github.ref_name == 'dev'
         with:
-          artifacts: "./nuget/*.nupkg"
+          artifacts: |
+            ./nuget/*.nupkg
           body: ${{ steps.get_releasenote.outputs.body }}
           token: ${{ env.GB_NUGET_TOKEN }}
           prerelease: ${{ github.ref_name != 'master' }}
@@ -69,7 +71,7 @@ jobs:
   
   publish_github:
     needs: build
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Download build artifact
         uses: actions/download-artifact@v4.1.7
@@ -80,12 +82,15 @@ jobs:
         if: github.ref_name == 'master' || github.ref_name == 'dev'
         run: |
           dotnet nuget push *.nupkg --api-key "${{ env.GB_NUGET_TOKEN }}" --source "https://nuget.pkg.github.com/HaitaoJin/index.json" --skip-duplicate
+          if (Test-Path "*.snupkg") {
+            dotnet nuget push *.snupkg --api-key "${{ env.GB_NUGET_TOKEN }}" --source "https://nuget.pkg.github.com/HaitaoJin/index.json" --skip-duplicate
+          }
           Write-Host "done publishing packages"
-        shell: powershell
+        shell: pwsh
 
   publish_nuget:
     needs: build
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Download build artifact
         uses: actions/download-artifact@v4.1.7
@@ -96,5 +101,8 @@ jobs:
         if: github.ref_name == 'master' || github.ref_name == 'dev'
         run: |
           dotnet nuget push *.nupkg --api-key "${{ env.MS_NUGET_TOKEN }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
+          if (Test-Path "*.snupkg") {
+            dotnet nuget push *.snupkg --api-key "${{ env.MS_NUGET_TOKEN }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
+          }
           Write-Host "done publishing packages"
-        shell: powershell
+        shell: pwsh

@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/HaitaoJin/syzero-core</RepositoryUrl>
     <RepositoryType>git</RepositoryType>  
     <PackageReadmeFile Condition="Exists('$(SyZeroModuleReadmePath)')">README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://docs.syzero.com/syzero/modules/</PackageProjectUrl>
+    <PackageProjectUrl>https://docs.syzero.com/modules/</PackageProjectUrl>
     <!-- SourceLink 支持 -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>

@@ -32,3 +32,7 @@ nuget/*.snupkg
 **/*.db
 
 ReleaseNote.md
+
+# VitePress docs
+docs/node_modules/
+docs/.vitepress/dist/

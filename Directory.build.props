@@ -2,8 +2,9 @@
   <PropertyGroup>
     <!-- 根目录路径 -->
     <SyZeroRootPath>$(MSBuildThisFileDirectory)</SyZeroRootPath>
-    <SyZeroLogoPath>$(SyZeroRootPath)doc\icon\logo.png</SyZeroLogoPath>
+    <SyZeroLogoPath>$(SyZeroRootPath)docs\public\icon\logo.png</SyZeroLogoPath>
     <SyZeroLicensePath>$(SyZeroRootPath)LICENSE</SyZeroLicensePath>
+    <SyZeroModuleReadmePath>$(SyZeroRootPath)docs\modules\$(MSBuildProjectName).md</SyZeroModuleReadmePath>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -22,8 +23,8 @@
     <PackageLicenseFile Condition="Exists('$(SyZeroLicensePath)')">LICENSE</PackageLicenseFile>
     <RepositoryUrl>https://github.com/HaitaoJin/syzero-core</RepositoryUrl>
     <RepositoryType>git</RepositoryType>  
-    <PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)\README.md')">README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://docs.syzero.com/Modules/$(MSBuildProjectName)</PackageProjectUrl>
+    <PackageReadmeFile Condition="Exists('$(SyZeroModuleReadmePath)')">README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://docs.syzero.com/syzero/modules/</PackageProjectUrl>
     <!-- SourceLink 支持 -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
@@ -40,6 +41,6 @@
   <ItemGroup>
     <None Include="$(SyZeroLogoPath)" Pack="true" PackagePath="" Condition="Exists('$(SyZeroLogoPath)')" />
     <None Include="$(SyZeroLicensePath)" Pack="true" PackagePath="" Condition="Exists('$(SyZeroLicensePath)')" />
-    <None Include="$(MSBuildProjectDirectory)\README.md" Pack="true" PackagePath="" Condition="Exists('$(MSBuildProjectDirectory)\README.md')" />
+    <None Include="$(SyZeroModuleReadmePath)" Pack="true" PackagePath="README.md" Condition="Exists('$(SyZeroModuleReadmePath)')" />
   </ItemGroup>
 </Project>

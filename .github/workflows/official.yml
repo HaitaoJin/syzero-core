@@ -62,7 +62,7 @@ jobs:
         if: github.ref_name == 'master' || github.ref_name == 'dev'
         with:
           artifacts: "./nuget/*.nupkg"
-          bodyFile: 'ReleaseNote.md'
+          body: ${{ steps.get_releasenote.outputs.body }}
           token: ${{ env.GB_NUGET_TOKEN }}
           prerelease: ${{ github.ref_name != 'master' }}
           tag: v${{ env.BUILD_BUILDNUMBER }}

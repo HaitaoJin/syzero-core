@@ -25,11 +25,13 @@ foreach ($row in $releaseNotes) {
 }
 
 if ([string]::IsNullOrWhiteSpace($node)) {
-    throw "Cannot find release note section for version '$version' in docs/release-notes.md"
+    # If no matching section is found, keep release body empty and continue.
+    $releaseBody = ""
 }
-
-$releaseBody = $node.TrimEnd()
-Write-Host $node
+else {
+    $releaseBody = $node.TrimEnd()
+    Write-Host $node
+}
 
 if ($env:GITHUB_OUTPUT) {
     $delimiter = "EOF_$([guid]::NewGuid().ToString('N'))"

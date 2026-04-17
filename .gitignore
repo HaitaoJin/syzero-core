@@ -36,3 +36,4 @@ ReleaseNote.md
 # VitePress docs
 docs/node_modules/
 docs/.vitepress/dist/
+docs/.vitepress/cache/

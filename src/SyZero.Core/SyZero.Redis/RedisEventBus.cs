@@ -37,6 +37,11 @@ namespace SyZero.Redis
         public void Subscribe<T, TH>(Func<TH> handler)
             where TH : IEventHandler<T>
         {
+            if (handler == null)
+            {
+                throw new ArgumentNullException(nameof(handler));
+            }
+
             var eventName = GetEventKey<T>();
             DoSubscribe(typeof(TH), eventName, () => handler());
         }
@@ -44,6 +49,7 @@ namespace SyZero.Redis
         public void SubscribeDynamic<TH>(string eventName)
             where TH : IDynamicEventHandler
         {
+            ValidateEventName(eventName);
             DoSubscribeDynamic(typeof(TH), eventName);
         }
 
@@ -58,7 +64,7 @@ namespace SyZero.Redis
                 if (_subscriptions.TryGetValue(eventName, out var handlers))
                 {
                     handlers.Remove(handlerType);
-                    _handlerFactories.TryRemove($"{eventName}_{handlerType.Name}", out _);
+                    _handlerFactories.TryRemove(GetHandlerKey(eventName, handlerType), out _);
 
                     if (handlers.Count == 0)
                     {
@@ -73,6 +79,7 @@ namespace SyZero.Redis
         public void UnsubscribeDynamic<TH>(string eventName)
             where TH : IDynamicEventHandler
         {
+            ValidateEventName(eventName);
             var handlerType = typeof(TH);
 
             lock (_subscriptionLock)
@@ -113,10 +120,7 @@ namespace SyZero.Redis
 
         public Task PublishAsync(string eventName, object eventData)
         {
-            if (string.IsNullOrWhiteSpace(eventName))
-            {
-                throw new ArgumentException("Event name is required.", nameof(eventName));
-            }
+            ValidateEventName(eventName);
 
             var envelope = new RedisEventEnvelope
             {
@@ -156,12 +160,18 @@ namespace SyZero.Redis
                 _dynamicSubscriptions.Clear();
                 _handlerFactories.Clear();
 
+                var subscribedChannels = _channelSubscriptions.Keys.Select(GetChannel).ToArray();
                 foreach (var subscription in _channelSubscriptions.Values)
                 {
                     subscription.Dispose();
                 }
 
                 _channelSubscriptions.Clear();
+
+                if (subscribedChannels.Length > 0)
+                {
+                    _redis.UnSubscribe(subscribedChannels);
+                }
             }
         }
 
@@ -172,6 +182,8 @@ namespace SyZero.Redis
 
         public bool IsSubscribed(string eventName)
         {
+            ValidateEventName(eventName);
+
             lock (_subscriptionLock)
             {
                 return _subscriptions.ContainsKey(eventName) || _dynamicSubscriptions.ContainsKey(eventName);
@@ -224,7 +236,7 @@ namespace SyZero.Redis
                 }
 
                 handlers.Add(handlerType);
-                _handlerFactories[$"{eventName}_{handlerType.Name}"] = handlerFactory;
+                _handlerFactories[GetHandlerKey(eventName, handlerType)] = handlerFactory;
                 EnsureRedisSubscription(eventName);
             }
         }
@@ -294,8 +306,7 @@ namespace SyZero.Redis
             {
                 try
                 {
-                    var factoryKey = $"{envelope.EventName}_{handlerType.Name}";
-                    if (!_handlerFactories.TryGetValue(factoryKey, out var factory))
+                    if (!_handlerFactories.TryGetValue(GetHandlerKey(envelope.EventName, handlerType), out var factory))
                     {
                         continue;
                     }
@@ -387,6 +398,11 @@ namespace SyZero.Redis
             return typeof(T).Name;
         }
 
+        private static string GetHandlerKey(string eventName, Type handlerType)
+        {
+            return $"{eventName}_{handlerType.FullName ?? handlerType.Name}";
+        }
+
         private static RedisEventEnvelope DeserializeEnvelope(string fallbackEventName, string message)
         {
             try
@@ -472,6 +488,14 @@ namespace SyZero.Redis
                     Console.WriteLine($"SyZero.Redis.EventBus: {operationName}失败: {ex.Message}");
                 }
             });
+        }
+
+        private static void ValidateEventName(string eventName)
+        {
+            if (string.IsNullOrWhiteSpace(eventName))
+            {
+                throw new ArgumentException("Event name is required.", nameof(eventName));
+            }
         }
 
         private sealed class RedisEventEnvelope

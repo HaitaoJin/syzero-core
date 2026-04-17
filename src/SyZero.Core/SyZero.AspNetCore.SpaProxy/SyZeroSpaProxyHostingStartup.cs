@@ -9,6 +9,8 @@ namespace SyZero.AspNetCore.SpaProxy
         {
             builder.ConfigureServices(services =>
             {
+                services.AddSingleton<ISpaProxyServerProbe, HttpClientSpaProxyServerProbe>();
+                services.AddSingleton<ISpaProxyProcessFactory, DefaultSpaProxyProcessFactory>();
                 services.AddSingleton<SpaProxyLaunchManager>();
                 services.AddHostedService<SpaProxyLaunchHostedService>();
                 services.AddSingleton<IStartupFilter, SpaProxyStartupFilter>();

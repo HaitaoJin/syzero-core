@@ -1,7 +1,8 @@
-﻿using System.Reflection;
+using System.Reflection;
 using AutoMapper;
 using AutoMapper.EquivalencyExpression;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace SyZero
 {
@@ -17,7 +18,9 @@ namespace SyZero
         /// <returns>服务集合</returns>
         public static IServiceCollection AddSyZeroAutoMapper(this IServiceCollection services)
         {
-            return services.AddSyZeroAutoMapper(ReflectionHelper.GetAssemblies().ToArray());
+            ArgumentNullException.ThrowIfNull(services);
+
+            return AddSyZeroAutoMapper(services, configAction: null, Array.Empty<Assembly>());
         }
 
         /// <summary>
@@ -28,14 +31,9 @@ namespace SyZero
         /// <returns>服务集合</returns>
         public static IServiceCollection AddSyZeroAutoMapper(this IServiceCollection services, params Assembly[] assemblies)
         {
-            services.AddAutoMapper(cfg =>
-            {
-                cfg.AddCollectionMappers();
-            }, assemblies);
+            ArgumentNullException.ThrowIfNull(services);
 
-            services.AddScoped<SyZero.ObjectMapper.IObjectMapper, SyZero.AutoMapper.ObjectMapper>();
-
-            return services;
+            return AddSyZeroAutoMapper(services, configAction: null, assemblies);
         }
 
         /// <summary>
@@ -47,18 +45,34 @@ namespace SyZero
         /// <returns>服务集合</returns>
         public static IServiceCollection AddSyZeroAutoMapper(
             this IServiceCollection services,
-            Action<IMapperConfigurationExpression> configAction,
+            Action<IMapperConfigurationExpression>? configAction,
             params Assembly[] assemblies)
         {
+            ArgumentNullException.ThrowIfNull(services);
+
+            var resolvedAssemblies = ResolveAssemblies(assemblies);
+
             services.AddAutoMapper(cfg =>
             {
                 cfg.AddCollectionMappers();
                 configAction?.Invoke(cfg);
-            }, assemblies);
+            }, resolvedAssemblies);
 
-            services.AddScoped<SyZero.ObjectMapper.IObjectMapper, SyZero.AutoMapper.ObjectMapper>();
+            services.Replace(ServiceDescriptor.Singleton<SyZero.ObjectMapper.IObjectMapper, SyZero.AutoMapper.ObjectMapper>());
 
             return services;
+        }
+
+        private static Assembly[] ResolveAssemblies(Assembly[]? assemblies)
+        {
+            var resolvedAssemblies = assemblies?
+                .OfType<Assembly>()
+                .Distinct()
+                .ToArray();
+
+            return resolvedAssemblies is { Length: > 0 }
+                ? resolvedAssemblies
+                : ReflectionHelper.GetAssemblies().Distinct().ToArray();
         }
     }
 }

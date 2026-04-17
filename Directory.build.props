@@ -1,7 +1,7 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <!-- 根目录路径 -->
-    <SyZeroRootPath>$(MSBuildThisFileDirectory)..\</SyZeroRootPath>
+    <SyZeroRootPath>$(MSBuildThisFileDirectory)</SyZeroRootPath>
     <SyZeroLogoPath>$(SyZeroRootPath)doc\icon\logo.png</SyZeroLogoPath>
     <SyZeroLicensePath>$(SyZeroRootPath)LICENSE</SyZeroLicensePath>
   </PropertyGroup>

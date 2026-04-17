@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 
 namespace SyZero.DynamicGrpc
@@ -101,6 +102,16 @@ namespace SyZero.DynamicGrpc
             {
                 throw new ArgumentException($"{nameof(RemoveMethodPostfixes)} 不能为 null。");
             }
+
+            RemoveServicePostfixes = RemoveServicePostfixes
+                .Where(postfix => !string.IsNullOrWhiteSpace(postfix))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            RemoveMethodPostfixes = RemoveMethodPostfixes
+                .Where(postfix => !string.IsNullOrWhiteSpace(postfix))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
             if (MaxReceiveMessageSize.HasValue && MaxReceiveMessageSize.Value <= 0)
             {

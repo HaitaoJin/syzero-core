@@ -118,6 +118,11 @@
             注册单个 Feign 代理
             </summary>
         </member>
+        <member name="M:SyZero.Feign.FeignServiceRegistrar.CreateEffectiveService(SyZero.Feign.FeignService,SyZero.Feign.ServiceSetting)">
+            <summary>
+            合并全局配置（服务配置优先）
+            </summary>
+        </member>
         <member name="M:SyZero.Feign.FeignServiceRegistrar.MergeGlobalSettings(SyZero.Feign.FeignService,SyZero.Feign.ServiceSetting)">
             <summary>
             合并全局配置（服务配置优先）
@@ -238,7 +243,7 @@
             创建 HttpClient
             </summary>
         </member>
-        <member name="M:SyZero.Feign.Proxy.HttpProxyFactory.CreateRefitSettings(SyZero.Feign.FeignService,SyZero.Serialization.IJsonSerialize)">
+        <member name="M:SyZero.Feign.Proxy.HttpProxyFactory.CreateRefitSettings(SyZero.Serialization.IJsonSerialize)">
             <summary>
             创建 Refit 设置
             </summary>

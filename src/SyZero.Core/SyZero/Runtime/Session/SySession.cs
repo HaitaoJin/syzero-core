@@ -24,7 +24,7 @@ namespace SyZero.Runtime.Session
         {
             get
             {
-                var tenantIdClaim = Principal?.Identities?.FirstOrDefault().Claims.FirstOrDefault(c => c.Type == SyClaimTypes.UserId);
+                var tenantIdClaim = Principal?.Identities?.FirstOrDefault()?.Claims.FirstOrDefault(c => c.Type == SyClaimTypes.UserId);
                 if (!string.IsNullOrEmpty(tenantIdClaim?.Value))
                 {
                     return tenantIdClaim.Value.ToLong();
@@ -37,7 +37,7 @@ namespace SyZero.Runtime.Session
         {
             get
             {
-                var tenantIdClaim = Principal?.Identities?.FirstOrDefault().Claims.FirstOrDefault(c => c.Type == SyClaimTypes.UserRole);
+                var tenantIdClaim = Principal?.Identities?.FirstOrDefault()?.Claims.FirstOrDefault(c => c.Type == SyClaimTypes.UserRole);
                 if (!string.IsNullOrEmpty(tenantIdClaim?.Value))
                 {
                     return tenantIdClaim.Value;
@@ -50,7 +50,7 @@ namespace SyZero.Runtime.Session
         {
             get
             {
-                var tenantIdClaim = Principal?.Identities?.FirstOrDefault().Claims.FirstOrDefault(c => c.Type == SyClaimTypes.UserName);
+                var tenantIdClaim = Principal?.Identities?.FirstOrDefault()?.Claims.FirstOrDefault(c => c.Type == SyClaimTypes.UserName);
                 if (!string.IsNullOrEmpty(tenantIdClaim?.Value))
                 {
                     return tenantIdClaim.Value;
@@ -63,7 +63,7 @@ namespace SyZero.Runtime.Session
         {
             get
             {
-                var tenantIdClaim = Principal?.Identities?.FirstOrDefault().Claims.FirstOrDefault(c => c.Type == SyClaimTypes.Permission);
+                var tenantIdClaim = Principal?.Identities?.FirstOrDefault()?.Claims.FirstOrDefault(c => c.Type == SyClaimTypes.Permission);
                 if (!string.IsNullOrEmpty(tenantIdClaim?.Value))
                 {
                     return _jsonSerialize.JSONToObject<List<string>>(tenantIdClaim.Value);
@@ -76,7 +76,7 @@ namespace SyZero.Runtime.Session
         {
             get
             {
-                var tenantIdClaim = Principal?.Identities?.FirstOrDefault().Claims.FirstOrDefault(c => c.Type == SyClaimTypes.Token);
+                var tenantIdClaim = Principal?.Identities?.FirstOrDefault()?.Claims.FirstOrDefault(c => c.Type == SyClaimTypes.Token);
                 if (!string.IsNullOrEmpty(tenantIdClaim?.Value))
                 {
                     return tenantIdClaim.Value;

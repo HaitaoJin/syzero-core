@@ -82,8 +82,8 @@ public class MyService
 
     public async Task<string> GetServiceUrlAsync(string serviceName)
     {
-        var service = await _serviceManagement.GetServiceAsync(serviceName);
-        return $"{service.Address}:{service.Port}";
+        var service = await _serviceManagement.GetServiceInstance(serviceName);
+        return $"{service.ServiceAddress}:{service.ServicePort}";
     }
 }
 ```
@@ -108,12 +108,13 @@ public class MyService
 
 | 方法 | 说明 |
 |------|------|
-| `GetServiceAsync(serviceName)` | 获取服务实例 |
-| `GetServicesAsync(serviceName)` | 获取所有服务实例 |
-| `RegisterAsync()` | 注册服务 |
-| `DeregisterAsync()` | 注销服务 |
-
-> 所有方法都有对应的异步版本（带 `Async` 后缀）
+| `GetService(serviceName)` | 获取所有服务实例 |
+| `GetHealthyServices(serviceName)` | 获取健康服务实例 |
+| `GetServiceInstance(serviceName)` | 获取单个可用服务实例 |
+| `RegisterService(serviceInfo)` | 注册服务 |
+| `DeregisterService(serviceId)` | 注销服务 |
+| `Subscribe(serviceName, callback)` | 订阅服务变更 |
+| `Unsubscribe(serviceName)` | 取消订阅服务变更 |
 
 ---
 

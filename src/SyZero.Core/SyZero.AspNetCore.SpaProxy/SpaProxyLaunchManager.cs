@@ -1,10 +1,7 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Logging;
 using System;
-using System.Diagnostics;
 using System.IO;
-using System.Net.Http;
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,23 +10,25 @@ namespace SyZero.AspNetCore.SpaProxy
 {
     internal sealed class SpaProxyLaunchManager
     {
-        private static readonly HttpClient HttpClient = new HttpClient(new HttpClientHandler
-        {
-            AllowAutoRedirect = true
-        })
-        {
-            Timeout = TimeSpan.FromSeconds(2)
-        };
+        private static readonly TimeSpan LaunchPollInterval = TimeSpan.FromMilliseconds(200);
 
         private readonly Lazy<SpaProxyServerInfo?> _serverInfo;
         private readonly ILogger<SpaProxyLaunchManager> _logger;
+        private readonly ISpaProxyServerProbe _serverProbe;
+        private readonly ISpaProxyProcessFactory _processFactory;
         private readonly SemaphoreSlim _launchLock = new SemaphoreSlim(1, 1);
         private readonly object _processLock = new object();
-        private Process? _launchedProcess;
+        private ISpaProxyProcess? _launchedProcess;
 
-        public SpaProxyLaunchManager(IWebHostEnvironment environment, ILogger<SpaProxyLaunchManager> logger)
+        public SpaProxyLaunchManager(
+            IWebHostEnvironment environment,
+            ILogger<SpaProxyLaunchManager> logger,
+            ISpaProxyServerProbe serverProbe,
+            ISpaProxyProcessFactory processFactory)
         {
             _logger = logger;
+            _serverProbe = serverProbe;
+            _processFactory = processFactory;
             _serverInfo = new Lazy<SpaProxyServerInfo?>(() => LoadServerInfo(environment));
         }
 
@@ -43,7 +42,7 @@ namespace SyZero.AspNetCore.SpaProxy
                 return false;
             }
 
-            return await CanReachServerAsync(serverInfo.ServerUrl, cancellationToken);
+            return await _serverProbe.CanReachServerAsync(serverInfo.ServerUrl, cancellationToken);
         }
 
         public async Task EnsureServerStartedAsync(CancellationToken cancellationToken)
@@ -54,7 +53,7 @@ namespace SyZero.AspNetCore.SpaProxy
                 return;
             }
 
-            if (await CanReachServerAsync(serverInfo.ServerUrl, cancellationToken))
+            if (await _serverProbe.CanReachServerAsync(serverInfo.ServerUrl, cancellationToken))
             {
                 return;
             }
@@ -62,12 +61,18 @@ namespace SyZero.AspNetCore.SpaProxy
             await _launchLock.WaitAsync(cancellationToken);
             try
             {
-                if (await CanReachServerAsync(serverInfo.ServerUrl, cancellationToken))
+                if (await _serverProbe.CanReachServerAsync(serverInfo.ServerUrl, cancellationToken))
                 {
                     return;
                 }
 
                 LaunchSpaProcess(serverInfo);
+                if (await WaitForServerToAcceptConnectionsAsync(serverInfo, cancellationToken))
+                {
+                    return;
+                }
+
+                _logger.LogWarning("SPA development server at '{ServerUrl}' did not become reachable within {TimeoutSeconds} seconds.", serverInfo.ServerUrl, serverInfo.MaxTimeoutInSeconds);
             }
             finally
             {
@@ -83,7 +88,7 @@ namespace SyZero.AspNetCore.SpaProxy
                 return;
             }
 
-            Process? processToStop = null;
+            ISpaProxyProcess? processToStop = null;
             lock (_processLock)
             {
                 if (_launchedProcess != null)
@@ -134,14 +139,9 @@ namespace SyZero.AspNetCore.SpaProxy
                 }
             }
 
-            var startInfo = BuildProcessStartInfo(serverInfo);
             _logger.LogInformation("Starting SPA development server with command '{Command}' in '{WorkingDirectory}'.", serverInfo.LaunchCommand, serverInfo.WorkingDirectory);
 
-            var process = new Process
-            {
-                StartInfo = startInfo,
-                EnableRaisingEvents = true
-            };
+            var process = _processFactory.Create(serverInfo);
             process.Exited += HandleLaunchedProcessExited;
 
             try
@@ -163,50 +163,44 @@ namespace SyZero.AspNetCore.SpaProxy
             _logger.LogInformation("Started SPA development server process {ProcessId}.", process.Id);
         }
 
-        private static ProcessStartInfo BuildProcessStartInfo(SpaProxyServerInfo serverInfo)
+        private async Task<bool> WaitForServerToAcceptConnectionsAsync(SpaProxyServerInfo serverInfo, CancellationToken cancellationToken)
         {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            var timeout = serverInfo.MaxTimeoutInSeconds <= 0
+                ? TimeSpan.Zero
+                : TimeSpan.FromSeconds(serverInfo.MaxTimeoutInSeconds);
+            var deadline = DateTimeOffset.UtcNow.Add(timeout);
+
+            while (true)
             {
-                return new ProcessStartInfo
+                if (await _serverProbe.CanReachServerAsync(serverInfo.ServerUrl, cancellationToken))
                 {
-                    FileName = "cmd.exe",
-                    Arguments = "/c " + serverInfo.LaunchCommand,
-                    WorkingDirectory = serverInfo.WorkingDirectory,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-            }
+                    return true;
+                }
 
-            return new ProcessStartInfo
-            {
-                FileName = "/bin/sh",
-                Arguments = "-c \"" + serverInfo.LaunchCommand.Replace("\"", "\\\"") + "\"",
-                WorkingDirectory = serverInfo.WorkingDirectory,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
+                if (!IsLaunchedProcessAlive())
+                {
+                    return false;
+                }
+
+                var remaining = deadline - DateTimeOffset.UtcNow;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    return await _serverProbe.CanReachServerAsync(serverInfo.ServerUrl, cancellationToken);
+                }
+
+                await Task.Delay(remaining < LaunchPollInterval ? remaining : LaunchPollInterval, cancellationToken);
+            }
         }
 
-        private static async Task<bool> CanReachServerAsync(string serverUrl, CancellationToken cancellationToken)
+        private bool IsLaunchedProcessAlive()
         {
-            if (!Uri.TryCreate(serverUrl, UriKind.Absolute, out var targetUri))
+            lock (_processLock)
             {
-                return false;
-            }
-
-            try
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Get, targetUri);
-                using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-                return true;
-            }
-            catch
-            {
-                return false;
+                return _launchedProcess != null && !_launchedProcess.HasExited;
             }
         }
 
-        private static SpaProxyServerInfo? LoadServerInfo(IWebHostEnvironment environment)
+        private SpaProxyServerInfo? LoadServerInfo(IWebHostEnvironment environment)
         {
             foreach (var candidatePath in new[]
             {
@@ -219,14 +213,21 @@ namespace SyZero.AspNetCore.SpaProxy
                     continue;
                 }
 
-                using var stream = File.OpenRead(candidatePath);
-                using var document = JsonDocument.Parse(stream);
-                if (!document.RootElement.TryGetProperty("SpaProxyServer", out var serverElement))
+                try
                 {
-                    continue;
-                }
+                    using var stream = File.OpenRead(candidatePath);
+                    using var document = JsonDocument.Parse(stream);
+                    if (!document.RootElement.TryGetProperty("SpaProxyServer", out var serverElement))
+                    {
+                        continue;
+                    }
 
-                return ParseServerInfo(serverElement);
+                    return ParseServerInfo(serverElement);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to load SPA proxy configuration from '{ConfigPath}'.", candidatePath);
+                }
             }
 
             return null;
@@ -323,7 +324,7 @@ namespace SyZero.AspNetCore.SpaProxy
 
         private void HandleLaunchedProcessExited(object? sender, EventArgs args)
         {
-            if (sender is not Process process)
+            if (sender is not ISpaProxyProcess process)
             {
                 return;
             }

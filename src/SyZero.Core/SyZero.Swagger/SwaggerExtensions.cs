@@ -1,18 +1,16 @@
 ﻿
-using SyZero.Cache;
 using SyZero.Configurations;
-using SyZero.Util;
-using System.Linq;
-using System.Collections.Generic;
 using Microsoft.Extensions.DependencyInjection;
 using Swashbuckle.AspNetCore.SwaggerGen;
 using System;
-using Microsoft.OpenApi.Models;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Xml.XPath;
-using SyZero.Swagger;
-using SyZero;
 using Microsoft.Extensions.Configuration;
+using Microsoft.OpenApi.Models;
+using SyZero;
+using SyZero.Swagger;
 
 namespace Microsoft.Extensions.DependencyInjection
 {
@@ -41,10 +39,8 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <exception cref="ArgumentNullException">options 为 null 时抛出</exception>
         public static IServiceCollection AddSwagger(this IServiceCollection services, SwaggerOptions options, Action<SwaggerGenOptions> swaggerGenAction = null)
         {
-            if (options == null)
-            {
-                throw new ArgumentNullException(nameof(options));
-            }
+            ArgumentNullException.ThrowIfNull(services);
+            ArgumentNullException.ThrowIfNull(options);
 
             options.Validate();
 
@@ -53,6 +49,7 @@ namespace Microsoft.Extensions.DependencyInjection
                 return services;
             }
 
+            services.AddEndpointsApiExplorer();
             services.AddSwaggerGen(swaggerGenOptions =>
             {
                 ConfigureSwaggerGen(swaggerGenOptions, options);
@@ -82,7 +79,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <returns>服务集合</returns>
         public static IServiceCollection AddSwagger(this IServiceCollection services, IConfiguration configuration, string sectionName = SwaggerOptions.SectionName)
         {
-            var config = configuration ?? AppConfig.Configuration;
+            ArgumentNullException.ThrowIfNull(services);
+
+            var config = GetConfiguration(configuration);
             var options = new SwaggerOptions();
             config.GetSection(sectionName).Bind(options);
             return AddSwagger(services, options);
@@ -98,11 +97,18 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <returns>服务集合</returns>
         public static IServiceCollection AddSwagger(this IServiceCollection services, Action<SwaggerOptions> optionsAction, IConfiguration configuration = null, string sectionName = SwaggerOptions.SectionName)
         {
-            var config = configuration ?? AppConfig.Configuration;
+            ArgumentNullException.ThrowIfNull(services);
+
+            var config = GetConfiguration(configuration);
             var options = new SwaggerOptions();
             config.GetSection(sectionName).Bind(options);
             optionsAction?.Invoke(options);
             return AddSwagger(services, options);
+        }
+
+        private static IConfiguration GetConfiguration(IConfiguration configuration)
+        {
+            return configuration ?? AppConfig.Configuration ?? new ConfigurationBuilder().Build();
         }
 
         /// <summary>
@@ -130,7 +136,7 @@ namespace Microsoft.Extensions.DependencyInjection
                 {
                     Name = options.ContactName,
                     Email = options.ContactEmail,
-                    Url = string.IsNullOrWhiteSpace(options.ContactUrl) ? null : new Uri(options.ContactUrl)
+                    Url = CreateUriOrThrow(options.ContactUrl, nameof(options.ContactUrl))
                 };
             }
 
@@ -140,14 +146,14 @@ namespace Microsoft.Extensions.DependencyInjection
                 openApiInfo.License = new OpenApiLicense
                 {
                     Name = options.LicenseName,
-                    Url = string.IsNullOrWhiteSpace(options.LicenseUrl) ? null : new Uri(options.LicenseUrl)
+                    Url = CreateUriOrThrow(options.LicenseUrl, nameof(options.LicenseUrl))
                 };
             }
 
             // 配置服务条款
             if (!string.IsNullOrWhiteSpace(options.TermsOfServiceUrl))
             {
-                openApiInfo.TermsOfService = new Uri(options.TermsOfServiceUrl);
+                openApiInfo.TermsOfService = CreateUriOrThrow(options.TermsOfServiceUrl, nameof(options.TermsOfServiceUrl));
             }
 
             swaggerGenOptions.SwaggerDoc(options.Version, openApiInfo);
@@ -202,30 +208,75 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         private static void ConfigureXmlComments(SwaggerGenOptions swaggerGenOptions, SwaggerOptions options)
         {
-            if (options.XmlCommentFiles != null && options.XmlCommentFiles.Count > 0)
-            {
-                // 使用指定的 XML 文件
-                foreach (var xmlFile in options.XmlCommentFiles)
-                {
-                    var xmlPath = Path.IsPathRooted(xmlFile)
-                        ? xmlFile
-                        : Path.Combine(AppContext.BaseDirectory, xmlFile);
+            var useExplicitFiles = options.XmlCommentFiles is { Count: > 0 };
 
-                    if (File.Exists(xmlPath))
-                    {
-                        swaggerGenOptions.OperationFilter<XmlCommentsOperation2Filter>(new XPathDocument(xmlPath));
-                    }
-                }
-            }
-            else
+            foreach (var xmlPath in ResolveXmlCommentPaths(options))
             {
-                // 自动扫描所有 XML 文件
-                var dir = new DirectoryInfo(AppContext.BaseDirectory);
-                foreach (FileInfo file in dir.EnumerateFiles("*.xml"))
+                var xmlDoc = LoadXmlCommentsDocument(xmlPath, throwOnInvalidFile: useExplicitFiles);
+                if (xmlDoc == null)
                 {
-                    swaggerGenOptions.OperationFilter<XmlCommentsOperation2Filter>(new XPathDocument(file.FullName));
+                    continue;
                 }
+
+                swaggerGenOptions.IncludeXmlComments(() => xmlDoc, includeControllerXmlComments: true);
+                swaggerGenOptions.OperationFilter<XmlCommentsOperation2Filter>(xmlDoc);
             }
+        }
+
+        private static IEnumerable<string> ResolveXmlCommentPaths(SwaggerOptions options)
+        {
+            if (options.XmlCommentFiles is { Count: > 0 })
+            {
+                return options.XmlCommentFiles
+                    .Where(xmlFile => !string.IsNullOrWhiteSpace(xmlFile))
+                    .Select(ResolveXmlCommentPath)
+                    .Where(File.Exists)
+                    .Distinct(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var dir = new DirectoryInfo(AppContext.BaseDirectory);
+            return dir.EnumerateFiles("*.xml")
+                .Select(file => file.FullName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static string ResolveXmlCommentPath(string xmlFile)
+        {
+            return Path.IsPathRooted(xmlFile)
+                ? xmlFile
+                : Path.Combine(AppContext.BaseDirectory, xmlFile);
+        }
+
+        private static XPathDocument LoadXmlCommentsDocument(string xmlPath, bool throwOnInvalidFile)
+        {
+            try
+            {
+                return new XPathDocument(xmlPath);
+            }
+            catch (Exception ex) when (!throwOnInvalidFile)
+            {
+                return null;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to load XML comments file '{xmlPath}'.", ex);
+            }
+        }
+
+        private static Uri CreateUriOrThrow(string value, string parameterName)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            if (Uri.TryCreate(value, UriKind.RelativeOrAbsolute, out var uri))
+            {
+                return uri;
+            }
+
+            throw new ArgumentException($"'{value}' is not a valid URI.", parameterName);
         }
     }
 }

@@ -1,9 +1,9 @@
 <Project>
   <PropertyGroup>
     <SyZeroFrontendProjectName Condition="'$(SyZeroFrontendProjectName)' == ''">$([System.String]::Copy('$(MSBuildProjectName)').Replace('.Web', '.Frontend'))</SyZeroFrontendProjectName>
-    <SpaRoot Condition="'$(SpaRoot)' == ''">..\$(SyZeroFrontendProjectName)\</SpaRoot>
-    <FrontendProjectPath Condition="'$(FrontendProjectPath)' == ''">$(MSBuildProjectDirectory)\..\$(SyZeroFrontendProjectName)\$(SyZeroFrontendProjectName).esproj</FrontendProjectPath>
-    <FrontendDistDir Condition="'$(FrontendDistDir)' == ''">$(MSBuildProjectDirectory)\..\$(SyZeroFrontendProjectName)\dist</FrontendDistDir>
+    <SpaRoot Condition="'$(SpaRoot)' == ''">../$(SyZeroFrontendProjectName)/</SpaRoot>
+    <FrontendProjectPath Condition="'$(FrontendProjectPath)' == ''">$(MSBuildProjectDirectory)/../$(SyZeroFrontendProjectName)/$(SyZeroFrontendProjectName).esproj</FrontendProjectPath>
+    <FrontendDistDir Condition="'$(FrontendDistDir)' == ''">$(MSBuildProjectDirectory)/../$(SyZeroFrontendProjectName)/dist/</FrontendDistDir>
     <BuildFrontendOnBuild Condition="'$(BuildFrontendOnBuild)' == '' and Exists('$(FrontendProjectPath)')">true</BuildFrontendOnBuild>
     <BuildFrontendOnBuild Condition="'$(BuildFrontendOnBuild)' == ''">false</BuildFrontendOnBuild>
     <SpaProxyRedirectUrl Condition="'$(SpaProxyRedirectUrl)' == ''">$(SpaProxyServerUrl)</SpaProxyRedirectUrl>

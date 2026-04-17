@@ -1,7 +1,9 @@
-﻿using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using System;
+using System.Security.Claims;
 using System.Threading;
 using SyZero.AspNetCore;
 using SyZero.AspNetCore.Middleware;
@@ -20,6 +22,9 @@ namespace Microsoft.AspNetCore.Builder
         /// <param name="routeAttribute"></param>
         public static void UseCentralRoutePrefix(this MvcOptions opts, IRouteTemplateProvider routeAttribute)
         {
+            ArgumentNullException.ThrowIfNull(opts);
+            ArgumentNullException.ThrowIfNull(routeAttribute);
+
             // 添加我们自定义 实现IApplicationModelConvention的RouteConvention
             opts.Conventions.Insert(0, new RouteConvention(routeAttribute));
         }
@@ -30,26 +35,38 @@ namespace Microsoft.AspNetCore.Builder
         /// <param name="app"></param>
         public static IApplicationBuilder UseSyAuthMiddleware(this IApplicationBuilder app, Func<ISySession, string> cacheKeyFun = null)
         {
-            Console.WriteLine("注入权限中间件...");
+            ArgumentNullException.ThrowIfNull(app);
+
             app.UseMiddleware<SyAuthMiddleware>();
             if (cacheKeyFun != null)
             {
                 app.Use(async (context, next) =>
                 {
                     var sySeesion = SyZeroUtil.GetScopeService<ISySession>();
-                    if (sySeesion.UserId != null)
+                    if (sySeesion?.UserId != null)
                     {
-                        var cache = SyZeroUtil.GetService<ICache>();
-                        if (!cache.Exist(cacheKeyFun(sySeesion)))
+                        var cache = context.RequestServices.GetService<ICache>();
+                        if (cache != null)
                         {
-                            Thread.CurrentPrincipal = null;
-                            context.User = null;
+                            var cacheKey = cacheKeyFun(sySeesion);
+                            if (string.IsNullOrWhiteSpace(cacheKey) || !cache.Exist(cacheKey))
+                            {
+                                ResetPrincipal(context);
+                            }
                         }
                     }
+
                     await next.Invoke();
                 });
             }
             return app;
+        }
+
+        private static void ResetPrincipal(HttpContext context)
+        {
+            var anonymous = new ClaimsPrincipal(new ClaimsIdentity());
+            Thread.CurrentPrincipal = anonymous;
+            context.User = anonymous;
         }
     }
 }

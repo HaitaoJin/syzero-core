@@ -4,14 +4,20 @@
         <name>SyZero.Log4Net</name>
     </assembly>
     <members>
+        <member name="M:SyZero.SyZeroLog4NetExtension.AddSyZeroLog4Net(Microsoft.Extensions.Logging.ILoggingBuilder)">
+            <summary>
+            注册 Log4Net 日志提供程序。
+            </summary>
+        </member>
         <member name="M:SyZero.SyZeroLog4NetExtension.AddSyZeroLog4Net(Microsoft.Extensions.Logging.ILoggingBuilder,System.String)">
             <summary>
-            注册Log4NetModule
+            注册 Log4Net 日志提供程序并指定配置文件。
             </summary>
-            <typeparam name="TContext"></typeparam>
-            <param name="builder"></param>
-            <param name="configuration"></param>
-            <returns></returns>
+        </member>
+        <member name="M:SyZero.SyZeroLog4NetExtension.AddSyZeroLog4Net(Microsoft.Extensions.Logging.ILoggingBuilder,System.Action{SyZero.Log4Net.SyZeroLog4NetOptions})">
+            <summary>
+            注册 Log4Net 日志提供程序并允许自定义选项。
+            </summary>
         </member>
     </members>
 </doc>

@@ -5,6 +5,7 @@ using SyZero.Service;
 using SyZero.Service.DBServiceManagement;
 using SyZero.Service.DBServiceManagement.Entity;
 using SyZero.Service.DBServiceManagement.Repository;
+using SyZero.Service.LocalServiceManagement;
 using Xunit;
 
 namespace SyZero.Tests;
@@ -85,6 +86,74 @@ public class ServiceManagementTests
             (ServiceInfo)(method.Invoke(null, new object[] { services }) ?? throw new InvalidOperationException("SelectByWeight returned null.")))));
 
         Assert.All(results, result => Assert.Contains(result.ServiceID, new[] { "1", "2" }));
+    }
+
+    [Fact]
+    public async Task LocalServiceManagement_GetServiceInstance_IsSafeUnderConcurrency()
+    {
+        using var serviceManagement = new LocalServiceManagement(new LocalServiceManagementOptions
+        {
+            EnableFilePersistence = false,
+            EnableFileWatcher = false,
+            EnableHealthCheck = false,
+            AutoCleanExpiredServices = false,
+            EnableLeaderElection = false
+        });
+
+        await serviceManagement.RegisterService(new ServiceInfo
+        {
+            ServiceID = "1",
+            ServiceName = "svc",
+            Weight = 1,
+            Enabled = true,
+            IsHealthy = true
+        });
+        await serviceManagement.RegisterService(new ServiceInfo
+        {
+            ServiceID = "2",
+            ServiceName = "svc",
+            Weight = 3,
+            Enabled = true,
+            IsHealthy = true
+        });
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 200)
+            .Select(_ => serviceManagement.GetServiceInstance("svc")));
+
+        Assert.All(results, result => Assert.Contains(result.ServiceID, new[] { "1", "2" }));
+    }
+
+    [Fact]
+    public async Task LocalServiceManagement_GetService_ReturnsSnapshots()
+    {
+        using var serviceManagement = new LocalServiceManagement(new LocalServiceManagementOptions
+        {
+            EnableFilePersistence = false,
+            EnableFileWatcher = false,
+            EnableHealthCheck = false,
+            AutoCleanExpiredServices = false,
+            EnableLeaderElection = false
+        });
+
+        await serviceManagement.RegisterService(new ServiceInfo
+        {
+            ServiceID = "node-1",
+            ServiceName = "svc",
+            ServiceAddress = "127.0.0.1",
+            Tags = new List<string> { "v1" },
+            Metadata = new Dictionary<string, string> { ["env"] = "test" }
+        });
+
+        var firstRead = await serviceManagement.GetService("svc");
+        firstRead[0].ServiceAddress = "mutated";
+        firstRead[0].Tags.Add("changed");
+        firstRead[0].Metadata["env"] = "changed";
+
+        var secondRead = await serviceManagement.GetService("svc");
+
+        Assert.Equal("127.0.0.1", secondRead[0].ServiceAddress);
+        Assert.Equal(new[] { "v1" }, secondRead[0].Tags);
+        Assert.Equal("test", secondRead[0].Metadata["env"]);
     }
 
     private static ServiceRegistryEntity CreateEntity(string serviceName, string serviceId, double weight)

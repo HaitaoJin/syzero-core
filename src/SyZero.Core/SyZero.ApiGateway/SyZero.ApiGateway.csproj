@@ -12,6 +12,6 @@
     <PackageReference Include="Ocelot.Cache.CacheManager" />
     <PackageReference Include="Ocelot.Provider.Consul" />
     <PackageReference Include="Ocelot.Provider.Polly" />
+    <PackageReference Include="Swashbuckle.AspNetCore" />
   </ItemGroup>
-
 </Project>

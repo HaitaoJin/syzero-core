@@ -9,6 +9,7 @@ using Xunit;
 
 namespace SyZero.Tests;
 
+[Collection("AppConfig")]
 public class MongoDbTests
 {
     [Fact]

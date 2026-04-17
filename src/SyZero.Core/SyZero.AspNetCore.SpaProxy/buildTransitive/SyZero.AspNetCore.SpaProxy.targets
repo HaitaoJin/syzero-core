@@ -8,17 +8,21 @@
           Condition="'$(DesignTimeBuild)' != 'true' and '$(SpaProxyServerUrl)' != '' and '$(SpaProxyLaunchCommand)' != ''">
     <PropertyGroup>
       <_SpaProxyServerLaunchConfig>$(IntermediateOutputPath)spa.proxy.json</_SpaProxyServerLaunchConfig>
-      <_SpaRootFullPath>$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(SpaRoot)'))).Replace('\','\\'))</_SpaRootFullPath>
+      <_SpaRootFullPath>$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(SpaRoot)'))))</_SpaRootFullPath>
+      <_SpaProxyServerUrlJson>$([System.String]::Copy('$(SpaProxyServerUrl)').Replace('\', '\\').Replace('&quot;', '\&quot;'))</_SpaProxyServerUrlJson>
+      <_SpaProxyRedirectUrlJson>$([System.String]::Copy('$(SpaProxyRedirectUrl)').Replace('\', '\\').Replace('&quot;', '\&quot;'))</_SpaProxyRedirectUrlJson>
+      <_SpaProxyLaunchCommandJson>$([System.String]::Copy('$(SpaProxyLaunchCommand)').Replace('\', '\\').Replace('&quot;', '\&quot;'))</_SpaProxyLaunchCommandJson>
+      <_SpaRootFullPathJson>$([System.String]::Copy('$(_SpaRootFullPath)').Replace('\', '\\').Replace('&quot;', '\&quot;'))</_SpaRootFullPathJson>
       <_SpaProxyKeepRunningJson>$([System.String]::Copy('$(SpaProxyKeepRunning)').ToLowerInvariant())</_SpaProxyKeepRunningJson>
     </PropertyGroup>
     <ItemGroup>
       <_SpaProxyServerLaunchConfigLines Include="{" />
       <_SpaProxyServerLaunchConfigLines Include="  &quot;SpaProxyServer&quot;: {" />
-      <_SpaProxyServerLaunchConfigLines Include="    &quot;ServerUrl&quot;: &quot;$(SpaProxyServerUrl)&quot;," />
-      <_SpaProxyServerLaunchConfigLines Include="    &quot;RedirectUrl&quot;: &quot;$(SpaProxyRedirectUrl)&quot;," Condition="'$(SpaProxyRedirectUrl)' != ''" />
-      <_SpaProxyServerLaunchConfigLines Include="    &quot;RedirectUrl&quot;: &quot;$(SpaProxyServerUrl)&quot;," Condition="'$(SpaProxyRedirectUrl)' == ''" />
-      <_SpaProxyServerLaunchConfigLines Include="    &quot;LaunchCommand&quot;: &quot;$(SpaProxyLaunchCommand)&quot;," />
-      <_SpaProxyServerLaunchConfigLines Include="    &quot;WorkingDirectory&quot;: &quot;$(_SpaRootFullPath)&quot;," />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;ServerUrl&quot;: &quot;$(_SpaProxyServerUrlJson)&quot;," />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;RedirectUrl&quot;: &quot;$(_SpaProxyRedirectUrlJson)&quot;," Condition="'$(SpaProxyRedirectUrl)' != ''" />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;RedirectUrl&quot;: &quot;$(_SpaProxyServerUrlJson)&quot;," Condition="'$(SpaProxyRedirectUrl)' == ''" />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;LaunchCommand&quot;: &quot;$(_SpaProxyLaunchCommandJson)&quot;," />
+      <_SpaProxyServerLaunchConfigLines Include="    &quot;WorkingDirectory&quot;: &quot;$(_SpaRootFullPathJson)&quot;," />
       <_SpaProxyServerLaunchConfigLines Include="    &quot;MaxTimeoutInSeconds&quot;: $(SpaProxyTimeoutInSeconds)," />
       <_SpaProxyServerLaunchConfigLines Include="    &quot;KeepRunning&quot;: $(_SpaProxyKeepRunningJson)" />
       <_SpaProxyServerLaunchConfigLines Include="  }" />
@@ -60,18 +64,18 @@
 
     <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
       <RunCommand>/bin/sh</RunCommand>
-      <RunArguments>-c &quot;ASPNETCORE_HOSTINGSTARTUPASSEMBLIES='$(_SyZeroSpaProxyHostingStartupAssembly);${ASPNETCORE_HOSTINGSTARTUPASSEMBLIES}' exec \&quot;$(_SyZeroSpaProxyOriginalRunCommand)\&quot; $(_SyZeroSpaProxyOriginalRunArguments)&quot;</RunArguments>
+      <RunArguments>-c &quot;ASPNETCORE_HOSTINGSTARTUPASSEMBLIES=\&quot;$(_SyZeroSpaProxyHostingStartupAssembly)${ASPNETCORE_HOSTINGSTARTUPASSEMBLIES:+;${ASPNETCORE_HOSTINGSTARTUPASSEMBLIES}}\&quot; exec \&quot;$(_SyZeroSpaProxyOriginalRunCommand)\&quot; $(_SyZeroSpaProxyOriginalRunArguments)&quot;</RunArguments>
     </PropertyGroup>
   </Target>
 
   <Target Name="SyZeroCopyFrontendToPublish" AfterTargets="Publish"
           Condition="'$(DesignTimeBuild)' != 'true' and '$(BuildFrontendOnBuild)' == 'true' and Exists('$(FrontendDistDir)')">
     <ItemGroup>
-      <_SyZeroFrontendDistFiles Include="$(FrontendDistDir)\**\*" />
+      <_SyZeroFrontendDistFiles Include="$(FrontendDistDir)**/*" />
     </ItemGroup>
     <MakeDir Directories="$(PublishDir)wwwroot" />
     <Copy SourceFiles="@(_SyZeroFrontendDistFiles)"
-          DestinationFiles="@(_SyZeroFrontendDistFiles->'$(PublishDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
+          DestinationFiles="@(_SyZeroFrontendDistFiles->'$(PublishDir)wwwroot/%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
   </Target>
 </Project>

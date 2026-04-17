@@ -23,11 +23,13 @@ namespace SyZero.Redis
         private static readonly ThreadLocal<Random> RandomProvider = new ThreadLocal<Random>(() => new Random(Guid.NewGuid().GetHashCode()));
         private readonly HttpClient _httpClient;
         private readonly string _instanceId;
+        private readonly SemaphoreSlim _serviceMutationLock = new SemaphoreSlim(1, 1);
+        private readonly ConcurrentDictionary<string, IDisposable> _pubSubDisposables = new ConcurrentDictionary<string, IDisposable>();
         private Timer _healthCheckTimer;
         private Timer _cleanupTimer;
         private Timer _leaderRenewTimer;
-        private bool _isLeader = false;
-        private readonly ConcurrentDictionary<string, IDisposable> _pubSubDisposables = new ConcurrentDictionary<string, IDisposable>();
+        private bool _isLeader;
+        private bool _disposed;
 
         /// <summary>
         /// 当前实例是否为 Leader
@@ -48,20 +50,17 @@ namespace SyZero.Redis
         {
             _redis = redis ?? throw new ArgumentNullException(nameof(redis));
             _options = options ?? new RedisServiceManagementOptions();
+            _options.Validate();
             _instanceId = Guid.NewGuid().ToString("N");
 
-            // 初始化 HttpClient 用于健康检查
             _httpClient = new HttpClient
             {
                 Timeout = TimeSpan.FromSeconds(_options.HealthCheckTimeoutSeconds)
             };
 
-            // 如果启用 Leader 选举，先尝试获取 Leader
             if (_options.EnableLeaderElection)
             {
                 RunBackgroundTask(TryAcquireLeadershipAsync, "初始化 Leader 选举");
-
-                // 启动 Leader 续期定时器
                 _leaderRenewTimer = new Timer(
                     _ => RunBackgroundTask(TryAcquireLeadershipAsync, "Leader 续期"),
                     null,
@@ -70,11 +69,9 @@ namespace SyZero.Redis
             }
             else
             {
-                // 不启用选举时，所有实例都是 Leader
                 _isLeader = true;
             }
 
-            // 启动健康检查定时器
             if (_options.EnableHealthCheck)
             {
                 _healthCheckTimer = new Timer(
@@ -84,7 +81,6 @@ namespace SyZero.Redis
                     TimeSpan.FromSeconds(_options.HealthCheckIntervalSeconds));
             }
 
-            // 启动清理定时器
             if (_options.AutoCleanExpiredServices)
             {
                 _cleanupTimer = new Timer(
@@ -109,7 +105,6 @@ namespace SyZero.Redis
 
                 if (!string.IsNullOrEmpty(currentLeader))
                 {
-                    // 如果是自己持有的锁，续期
                     if (currentLeader == _instanceId)
                     {
                         _redis.Expire(leaderKey, _options.LeaderLockExpireSeconds);
@@ -117,12 +112,10 @@ namespace SyZero.Redis
                         return;
                     }
 
-                    // 锁被其他实例持有
                     _isLeader = false;
                     return;
                 }
 
-                // 尝试获取锁（使用 SetNx 保证原子性）
                 var success = _redis.SetNx(leaderKey, _instanceId, _options.LeaderLockExpireSeconds);
                 _isLeader = success;
 
@@ -145,14 +138,16 @@ namespace SyZero.Redis
         /// </summary>
         private void ReleaseLeadership()
         {
-            if (!_isLeader) return;
+            if (!_isLeader)
+            {
+                return;
+            }
 
             try
             {
                 var leaderKey = $"{_options.LeaderKeyPrefix}ServiceManagement";
                 var currentLeader = _redis.Get(leaderKey);
 
-                // 只释放自己持有的锁
                 if (currentLeader == _instanceId)
                 {
                     _redis.Del(leaderKey);
@@ -175,20 +170,23 @@ namespace SyZero.Redis
 
         public async Task<List<ServiceInfo>> GetService(string serviceName)
         {
+            ValidateServiceName(serviceName);
+
             var key = GetServiceKey(serviceName);
             var json = _redis.Get(key);
-
             if (string.IsNullOrEmpty(json))
             {
                 return new List<ServiceInfo>();
             }
 
             var services = JsonSerializer.Deserialize<List<ServiceInfo>>(json) ?? new List<ServiceInfo>();
-            return await Task.FromResult(services);
+            return await Task.FromResult(services.Where(service => service != null).ToList());
         }
 
         public async Task<List<ServiceInfo>> GetHealthyServices(string serviceName)
         {
+            ValidateServiceName(serviceName);
+
             var services = await GetService(serviceName);
             var now = DateTime.UtcNow;
 
@@ -196,24 +194,31 @@ namespace SyZero.Redis
                 s.Enabled &&
                 s.IsHealthy &&
                 (!s.LastHeartbeat.HasValue ||
-                 (now - s.LastHeartbeat.Value).TotalSeconds <= _options.ServiceExpireSeconds)
-            ).ToList();
+                 (now - s.LastHeartbeat.Value).TotalSeconds <= _options.ServiceExpireSeconds))
+                .ToList();
         }
 
         public async Task<ServiceInfo> GetServiceInstance(string serviceName)
         {
+            ValidateServiceName(serviceName);
+
             var services = await GetHealthyServices(serviceName);
-            if (services == null || services.Count == 0)
+            if (services.Count == 0)
             {
-                throw new Exception($"SyZero.Redis: 未找到可用的 {serviceName} 服务实例!");
+                throw new InvalidOperationException($"SyZero.Redis: 未找到可用的 {serviceName} 服务实例!");
             }
-            // 加权随机负载均衡
+
             return SelectByWeight(services);
         }
 
         private static ServiceInfo SelectByWeight(List<ServiceInfo> services)
         {
-            var totalWeight = services.Sum(s => s.Weight);
+            if (services == null || services.Count == 0)
+            {
+                throw new ArgumentException("服务实例列表不能为空", nameof(services));
+            }
+
+            var totalWeight = services.Sum(s => Math.Max(0, s.Weight));
             if (totalWeight <= 0)
             {
                 return services[GetRandom().Next(services.Count)];
@@ -223,12 +228,13 @@ namespace SyZero.Redis
             var currentWeight = 0.0;
             foreach (var service in services)
             {
-                currentWeight += service.Weight;
+                currentWeight += Math.Max(0, service.Weight);
                 if (randomWeight <= currentWeight)
                 {
                     return service;
                 }
             }
+
             return services.Last();
         }
 
@@ -244,6 +250,15 @@ namespace SyZero.Redis
 
         public async Task RegisterService(ServiceInfo serviceInfo)
         {
+            ThrowIfDisposed();
+
+            if (serviceInfo == null)
+            {
+                throw new ArgumentNullException(nameof(serviceInfo));
+            }
+
+            ValidateServiceName(serviceInfo.ServiceName);
+
             if (string.IsNullOrEmpty(serviceInfo.ServiceID))
             {
                 serviceInfo.ServiceID = Guid.NewGuid().ToString("N");
@@ -253,55 +268,61 @@ namespace SyZero.Redis
             {
                 serviceInfo.RegisterTime = DateTime.UtcNow;
             }
+
             serviceInfo.LastHeartbeat = DateTime.UtcNow;
+            serviceInfo.Tags ??= new List<string>();
+            serviceInfo.Metadata ??= new Dictionary<string, string>();
 
-            if (serviceInfo.Tags == null)
+            await _serviceMutationLock.WaitAsync();
+            try
             {
-                serviceInfo.Tags = new List<string>();
+                var key = GetServiceKey(serviceInfo.ServiceName);
+                var services = await GetService(serviceInfo.ServiceName);
+
+                services.RemoveAll(s => s.ServiceID == serviceInfo.ServiceID);
+                services.Add(serviceInfo);
+
+                _redis.Set(key, JsonSerializer.Serialize(services));
+                _redis.SAdd(_options.ServiceNamesKey, serviceInfo.ServiceName);
             }
-            if (serviceInfo.Metadata == null)
+            finally
             {
-                serviceInfo.Metadata = new Dictionary<string, string>();
+                _serviceMutationLock.Release();
             }
 
-            var key = GetServiceKey(serviceInfo.ServiceName);
-            var services = await GetService(serviceInfo.ServiceName);
-
-            // 移除已存在的相同 ID 的服务
-            services.RemoveAll(s => s.ServiceID == serviceInfo.ServiceID);
-            services.Add(serviceInfo);
-
-            // 保存到 Redis
-            var json = JsonSerializer.Serialize(services);
-            _redis.Set(key, json);
-
-            // 添加服务名到集合
-            _redis.SAdd(_options.ServiceNamesKey, serviceInfo.ServiceName);
-
-            // 发布服务变更通知
             PublishServiceChange(serviceInfo.ServiceName);
-
-            await Task.CompletedTask;
         }
 
         public async Task DeregisterService(string serviceId)
         {
-            var serviceNames = await GetAllServices();
+            ThrowIfDisposed();
 
-            foreach (var serviceName in serviceNames)
+            if (string.IsNullOrWhiteSpace(serviceId))
             {
-                var services = await GetService(serviceName);
-                var service = services.FirstOrDefault(s => s.ServiceID == serviceId);
+                throw new ArgumentException("服务实例 ID 不能为空", nameof(serviceId));
+            }
 
-                if (service != null)
+            var serviceNames = await GetAllServices();
+            string changedServiceName = null;
+
+            await _serviceMutationLock.WaitAsync();
+            try
+            {
+                foreach (var serviceName in serviceNames)
                 {
+                    var services = await GetService(serviceName);
+                    var service = services.FirstOrDefault(s => s.ServiceID == serviceId);
+                    if (service == null)
+                    {
+                        continue;
+                    }
+
                     services.Remove(service);
 
                     var key = GetServiceKey(serviceName);
                     if (services.Count > 0)
                     {
-                        var json = JsonSerializer.Serialize(services);
-                        _redis.Set(key, json);
+                        _redis.Set(key, JsonSerializer.Serialize(services));
                     }
                     else
                     {
@@ -309,10 +330,18 @@ namespace SyZero.Redis
                         _redis.SRem(_options.ServiceNamesKey, serviceName);
                     }
 
-                    // 发布服务变更通知
-                    PublishServiceChange(serviceName);
+                    changedServiceName = serviceName;
                     break;
                 }
+            }
+            finally
+            {
+                _serviceMutationLock.Release();
+            }
+
+            if (!string.IsNullOrEmpty(changedServiceName))
+            {
+                PublishServiceChange(changedServiceName);
             }
         }
 
@@ -322,8 +351,9 @@ namespace SyZero.Redis
 
         public async Task<bool> IsServiceHealthy(string serviceName)
         {
+            ValidateServiceName(serviceName);
             var healthyServices = await GetHealthyServices(serviceName);
-            return healthyServices != null && healthyServices.Count > 0;
+            return healthyServices.Count > 0;
         }
 
         /// <summary>
@@ -331,23 +361,45 @@ namespace SyZero.Redis
         /// </summary>
         public async Task HeartbeatAsync(string serviceId)
         {
-            var serviceNames = await GetAllServices();
+            ThrowIfDisposed();
 
-            foreach (var serviceName in serviceNames)
+            if (string.IsNullOrWhiteSpace(serviceId))
             {
-                var services = await GetService(serviceName);
-                var service = services.FirstOrDefault(s => s.ServiceID == serviceId);
+                throw new ArgumentException("服务实例 ID 不能为空", nameof(serviceId));
+            }
 
-                if (service != null)
+            var serviceNames = await GetAllServices();
+            string changedServiceName = null;
+
+            await _serviceMutationLock.WaitAsync();
+            try
+            {
+                foreach (var serviceName in serviceNames)
                 {
+                    var services = await GetService(serviceName);
+                    var service = services.FirstOrDefault(s => s.ServiceID == serviceId);
+                    if (service == null)
+                    {
+                        continue;
+                    }
+
                     service.LastHeartbeat = DateTime.UtcNow;
                     service.IsHealthy = true;
 
                     var key = GetServiceKey(serviceName);
-                    var json = JsonSerializer.Serialize(services);
-                    _redis.Set(key, json);
+                    _redis.Set(key, JsonSerializer.Serialize(services));
+                    changedServiceName = serviceName;
                     break;
                 }
+            }
+            finally
+            {
+                _serviceMutationLock.Release();
+            }
+
+            if (!string.IsNullOrEmpty(changedServiceName))
+            {
+                PublishServiceChange(changedServiceName);
             }
         }
 
@@ -356,7 +408,6 @@ namespace SyZero.Redis
         /// </summary>
         private async Task PerformHealthCheckAsync()
         {
-            // 如果启用了 Leader 选举且当前不是 Leader，则跳过健康检查
             if (_options.EnableLeaderElection && !_isLeader)
             {
                 return;
@@ -367,33 +418,38 @@ namespace SyZero.Redis
                 var serviceNames = await GetAllServices();
                 var changedServices = new HashSet<string>();
 
-                foreach (var serviceName in serviceNames)
+                await _serviceMutationLock.WaitAsync();
+                try
                 {
-                    var services = await GetService(serviceName);
-                    var hasChange = false;
-
-                    foreach (var service in services)
+                    foreach (var serviceName in serviceNames)
                     {
-                        var previousHealth = service.IsHealthy;
-                        var currentHealth = await CheckServiceHealthAsync(service);
+                        var services = await GetService(serviceName);
+                        var hasChange = false;
 
-                        if (previousHealth != currentHealth)
+                        foreach (var service in services)
                         {
-                            service.IsHealthy = currentHealth;
-                            hasChange = true;
+                            var previousHealth = service.IsHealthy;
+                            var currentHealth = await CheckServiceHealthAsync(service);
+                            if (previousHealth != currentHealth)
+                            {
+                                service.IsHealthy = currentHealth;
+                                hasChange = true;
+                            }
+                        }
+
+                        if (hasChange)
+                        {
+                            var key = GetServiceKey(serviceName);
+                            _redis.Set(key, JsonSerializer.Serialize(services));
+                            changedServices.Add(serviceName);
                         }
                     }
-
-                    if (hasChange)
-                    {
-                        var key = GetServiceKey(serviceName);
-                        var json = JsonSerializer.Serialize(services);
-                        _redis.Set(key, json);
-                        changedServices.Add(serviceName);
-                    }
+                }
+                finally
+                {
+                    _serviceMutationLock.Release();
                 }
 
-                // 发布服务变更通知
                 foreach (var serviceName in changedServices)
                 {
                     PublishServiceChange(serviceName);
@@ -410,7 +466,6 @@ namespace SyZero.Redis
         /// </summary>
         private async Task<bool> CheckServiceHealthAsync(ServiceInfo service)
         {
-            // 如果配置了健康检查URL，执行 HTTP 检查
             if (!string.IsNullOrEmpty(service.HealthCheckUrl))
             {
                 try
@@ -429,7 +484,6 @@ namespace SyZero.Redis
                 }
             }
 
-            // 没有配置健康检查URL，检查心跳时间
             if (service.LastHeartbeat.HasValue)
             {
                 var expireSeconds = service.HealthCheckIntervalSeconds > 0
@@ -446,7 +500,6 @@ namespace SyZero.Redis
         /// </summary>
         private async Task CleanExpiredServicesAsync()
         {
-            // 如果启用了 Leader 选举且当前不是 Leader，则跳过清理
             if (_options.EnableLeaderElection && !_isLeader)
             {
                 return;
@@ -456,17 +509,24 @@ namespace SyZero.Redis
             {
                 var serviceNames = await GetAllServices();
                 var now = DateTime.UtcNow;
+                var changedServices = new List<string>();
 
-                foreach (var serviceName in serviceNames)
+                await _serviceMutationLock.WaitAsync();
+                try
                 {
-                    var services = await GetService(serviceName);
-                    var expiredServices = services
-                        .Where(s => s.LastHeartbeat.HasValue &&
-                                   (now - s.LastHeartbeat.Value).TotalSeconds > _options.ServiceCleanSeconds)
-                        .ToList();
-
-                    if (expiredServices.Count > 0)
+                    foreach (var serviceName in serviceNames)
                     {
+                        var services = await GetService(serviceName);
+                        var expiredServices = services
+                            .Where(s => s.LastHeartbeat.HasValue &&
+                                        (now - s.LastHeartbeat.Value).TotalSeconds > _options.ServiceCleanSeconds)
+                            .ToList();
+
+                        if (expiredServices.Count == 0)
+                        {
+                            continue;
+                        }
+
                         foreach (var service in expiredServices)
                         {
                             services.Remove(service);
@@ -476,8 +536,7 @@ namespace SyZero.Redis
                         var key = GetServiceKey(serviceName);
                         if (services.Count > 0)
                         {
-                            var json = JsonSerializer.Serialize(services);
-                            _redis.Set(key, json);
+                            _redis.Set(key, JsonSerializer.Serialize(services));
                         }
                         else
                         {
@@ -485,9 +544,17 @@ namespace SyZero.Redis
                             _redis.SRem(_options.ServiceNamesKey, serviceName);
                         }
 
-                        // 发布服务变更通知
-                        PublishServiceChange(serviceName);
+                        changedServices.Add(serviceName);
                     }
+                }
+                finally
+                {
+                    _serviceMutationLock.Release();
+                }
+
+                foreach (var serviceName in changedServices)
+                {
+                    PublishServiceChange(serviceName);
                 }
             }
             catch (Exception ex)
@@ -502,9 +569,16 @@ namespace SyZero.Redis
 
         public Task Subscribe(string serviceName, Action<List<ServiceInfo>> callback)
         {
+            ThrowIfDisposed();
+            ValidateServiceName(serviceName);
+
+            if (callback == null)
+            {
+                throw new ArgumentNullException(nameof(callback));
+            }
+
             _subscriptions[serviceName] = callback;
 
-            // 如果启用了发布/订阅，订阅 Redis 频道
             if (_options.EnablePubSub)
             {
                 var channel = GetPubSubChannel(serviceName);
@@ -518,7 +592,7 @@ namespace SyZero.Redis
                     RunBackgroundTask(async () =>
                     {
                         var services = await GetService(serviceName);
-                        callback?.Invoke(services);
+                        callback(services);
                     }, $"服务变更通知回调({serviceName})");
                 });
             }
@@ -528,6 +602,7 @@ namespace SyZero.Redis
 
         public Task Unsubscribe(string serviceName)
         {
+            ValidateServiceName(serviceName);
             _subscriptions.TryRemove(serviceName, out _);
 
             if (_options.EnablePubSub)
@@ -561,12 +636,12 @@ namespace SyZero.Redis
                 }
             }
 
-            if (_subscriptions.TryGetValue(serviceName, out var callback))
+            if (!_options.EnablePubSub && _subscriptions.TryGetValue(serviceName, out var callback))
             {
                 RunBackgroundTask(async () =>
                 {
                     var services = await GetService(serviceName);
-                    callback?.Invoke(services);
+                    callback(services);
                 }, $"本地服务通知({serviceName})");
             }
         }
@@ -616,13 +691,24 @@ namespace SyZero.Redis
         /// </summary>
         public async Task ClearAsync()
         {
+            ThrowIfDisposed();
+
             var serviceNames = await GetAllServices();
-            foreach (var serviceName in serviceNames)
+            await _serviceMutationLock.WaitAsync();
+            try
             {
-                var key = GetServiceKey(serviceName);
-                _redis.Del(key);
+                foreach (var serviceName in serviceNames)
+                {
+                    var key = GetServiceKey(serviceName);
+                    _redis.Del(key);
+                }
+
+                _redis.Del(_options.ServiceNamesKey);
             }
-            _redis.Del(_options.ServiceNamesKey);
+            finally
+            {
+                _serviceMutationLock.Release();
+            }
         }
 
         /// <summary>
@@ -630,7 +716,13 @@ namespace SyZero.Redis
         /// </summary>
         public void Dispose()
         {
-            // 释放 Leader 权限
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+
             if (_options.EnableLeaderElection)
             {
                 ReleaseLeadership();
@@ -639,12 +731,31 @@ namespace SyZero.Redis
             _leaderRenewTimer?.Dispose();
             _healthCheckTimer?.Dispose();
             _cleanupTimer?.Dispose();
+
             foreach (var disposable in _pubSubDisposables.Values)
             {
                 disposable.Dispose();
             }
+
             _pubSubDisposables.Clear();
-            _httpClient?.Dispose();
+            _httpClient.Dispose();
+            _serviceMutationLock.Dispose();
+        }
+
+        private static void ValidateServiceName(string serviceName)
+        {
+            if (string.IsNullOrWhiteSpace(serviceName))
+            {
+                throw new ArgumentException("服务名称不能为空", nameof(serviceName));
+            }
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(RedisServiceManagement));
+            }
         }
 
         #endregion

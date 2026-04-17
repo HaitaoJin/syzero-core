@@ -30,13 +30,13 @@ jobs:
           dotnet-version: 9.0.x
 
       - name: Restore dependencies
-        run: dotnet restore ./src/SyZero.sln
+        run: dotnet restore ./SyZero.slnx
 
       - name: Build
-        run: dotnet build --configuration Release ./src/SyZero.sln --no-restore
+        run: dotnet build --configuration Release ./SyZero.slnx --no-restore
 
       - name: Create the package
-        run: dotnet pack --configuration Release ./src/SyZero.sln --no-restore
+        run: dotnet pack --configuration Release ./SyZero.slnx --no-restore
 
       - name: Upload package
         uses: actions/upload-artifact@v4

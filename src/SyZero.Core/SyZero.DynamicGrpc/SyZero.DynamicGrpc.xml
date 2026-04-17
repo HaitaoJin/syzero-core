@@ -116,6 +116,16 @@
             <param name="servicePrefix">服务前缀</param>
             <exception cref="T:System.ArgumentNullException">assembly 为 null 时抛出</exception>
         </member>
+        <member name="T:SyZero.DynamicGrpc.DynamicGrpcServiceDiscovery">
+            <summary>
+            Dynamic gRPC 服务发现辅助类
+            </summary>
+        </member>
+        <member name="M:SyZero.DynamicGrpc.DynamicGrpcServiceDiscovery.GetServiceTypes(SyZero.DynamicGrpc.DynamicGrpcOptions,SyZero.DynamicGrpc.DynamicGrpcServiceTypeProvider)">
+            <summary>
+            获取所有可注册的 Dynamic gRPC 服务类型
+            </summary>
+        </member>
         <member name="T:SyZero.DynamicGrpc.DynamicGrpcServiceExtensions">
             <summary>
             Dynamic gRPC 服务扩展方法
@@ -134,6 +144,15 @@
             <param name="options">配置选项</param>
             <returns>服务集合</returns>
             <exception cref="T:System.ArgumentNullException">options 为 null 时抛出</exception>
+        </member>
+        <member name="M:SyZero.DynamicGrpc.DynamicGrpcServiceExtensions.AddDynamicGrpc(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Reflection.Assembly,System.Reflection.Assembly[])">
+            <summary>
+            添加指定程序集中的 Dynamic gRPC 服务到依赖注入容器
+            </summary>
+            <param name="services">服务集合</param>
+            <param name="assembly">主程序集</param>
+            <param name="additionalAssemblies">额外程序集</param>
+            <returns>服务集合</returns>
         </member>
         <member name="M:SyZero.DynamicGrpc.DynamicGrpcServiceExtensions.AddDynamicGrpc(Microsoft.Extensions.DependencyInjection.IServiceCollection,Microsoft.Extensions.Configuration.IConfiguration,System.String)">
             <summary>
@@ -177,16 +196,6 @@
         <member name="M:SyZero.DynamicGrpc.DynamicGrpcServiceExtensions.RegisterDynamicGrpcServices(Microsoft.Extensions.DependencyInjection.IServiceCollection,SyZero.DynamicGrpc.DynamicGrpcOptions)">
             <summary>
             注册所有动态 gRPC 服务到 DI 容器
-            </summary>
-        </member>
-        <member name="M:SyZero.DynamicGrpc.DynamicGrpcServiceExtensions.GetDynamicGrpcServiceTypes(SyZero.DynamicGrpc.DynamicGrpcOptions)">
-            <summary>
-            获取所有动态 gRPC 服务类型
-            </summary>
-        </member>
-        <member name="M:SyZero.DynamicGrpc.DynamicGrpcServiceExtensions.IsValidDynamicGrpcService(System.Reflection.TypeInfo)">
-            <summary>
-            验证类型是否为有效的动态 gRPC 服务
             </summary>
         </member>
         <member name="T:SyZero.DynamicGrpc.DynamicGrpcServiceTypeProvider">

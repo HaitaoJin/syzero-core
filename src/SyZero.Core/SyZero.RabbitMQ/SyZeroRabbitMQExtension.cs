@@ -24,11 +24,17 @@ namespace SyZero
             this IServiceCollection services,
             RabbitMQ.RabbitMQEventBusOptions options)
         {
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+
             if (options == null)
             {
                 throw new ArgumentNullException(nameof(options));
             }
 
+            options.Validate();
             services.AddSingleton(options);
 
             // 注册连接工厂
@@ -86,6 +92,11 @@ namespace SyZero
             IConfiguration configuration = null,
             string sectionName = RabbitMQ.RabbitMQEventBusOptions.SectionName)
         {
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+
             var config = configuration ?? AppConfig.Configuration;
             var options = new RabbitMQ.RabbitMQEventBusOptions();
             config?.GetSection(sectionName)?.Bind(options);
@@ -106,6 +117,11 @@ namespace SyZero
             IConfiguration configuration = null,
             string sectionName = RabbitMQ.RabbitMQEventBusOptions.SectionName)
         {
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+
             var config = configuration ?? AppConfig.Configuration;
             var options = new RabbitMQ.RabbitMQEventBusOptions();
             config?.GetSection(sectionName)?.Bind(options);

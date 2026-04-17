@@ -1,37 +1,38 @@
-﻿using log4net;
+using log4net;
 using Microsoft.Extensions.Logging;
 using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace SyZero.Log4Net
 {
-    internal class NullScope : IDisposable
+    internal sealed class NullScope : IDisposable
     {
         public static NullScope Instance { get; } = new NullScope();
 
-        public void Dispose() { }
+        private NullScope()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
     }
-    public class Log4NetLogger : ILogger
+
+    public sealed class Log4NetLogger : ILogger
     {
         private readonly ILog _log;
-        private readonly string _categoryName;
 
-        public Log4NetLogger(ILog log, string categoryName)
+        public Log4NetLogger(ILog log)
         {
-            _log = log;
-            _categoryName = categoryName;
+            _log = log ?? throw new ArgumentNullException(nameof(log));
         }
 
         public IDisposable BeginScope<TState>(TState state)
         {
-            // 可实现：追踪作用域，维持上下文
             return NullScope.Instance;
         }
 
         public bool IsEnabled(LogLevel logLevel)
         {
-            // 根据log4net配置映射日志级别
             switch (logLevel)
             {
                 case LogLevel.Trace:
@@ -50,41 +51,41 @@ namespace SyZero.Log4Net
             }
         }
 
-        public void Log<TState>(LogLevel logLevel, EventId eventId,
-            TState state, Exception exception, Func<TState, Exception, string> formatter)
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
         {
-            if (!IsEnabled(logLevel))
-                return;
-
             if (formatter == null)
+            {
                 throw new ArgumentNullException(nameof(formatter));
+            }
+
+            if (!IsEnabled(logLevel))
+            {
+                return;
+            }
 
             var message = formatter(state, exception);
             if (string.IsNullOrEmpty(message) && exception == null)
+            {
                 return;
+            }
 
             switch (logLevel)
             {
                 case LogLevel.Trace:
                 case LogLevel.Debug:
-                    if (_log.IsDebugEnabled)
-                        _log.Debug(message, exception);
+                    _log.Debug(message, exception);
                     break;
                 case LogLevel.Information:
-                    if (_log.IsInfoEnabled)
-                        _log.Info(message, exception);
+                    _log.Info(message, exception);
                     break;
                 case LogLevel.Warning:
-                    if (_log.IsWarnEnabled)
-                        _log.Warn(message, exception);
+                    _log.Warn(message, exception);
                     break;
                 case LogLevel.Error:
-                    if (_log.IsErrorEnabled)
-                        _log.Error(message, exception);
+                    _log.Error(message, exception);
                     break;
                 case LogLevel.Critical:
-                    if (_log.IsFatalEnabled)
-                        _log.Fatal(message, exception);
+                    _log.Fatal(message, exception);
                     break;
             }
         }

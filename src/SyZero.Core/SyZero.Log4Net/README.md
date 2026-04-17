@@ -48,19 +48,20 @@ var builder = WebApplication.CreateBuilder(args);
 builder.AddSyZero();
 
 // 注册服务方式1 - 使用默认配置文件
-builder.Services.AddSyZeroLog4Net();
+builder.Logging.AddSyZeroLog4Net();
 
 // 注册服务方式2 - 指定配置文件
-builder.Services.AddSyZeroLog4Net(options =>
+builder.Logging.AddSyZeroLog4Net(options =>
 {
     options.ConfigFile = "log4net.config";
 });
 
 // 注册服务方式3 - 使用委托配置
-builder.Services.AddSyZeroLog4Net(options =>
+builder.Logging.AddSyZeroLog4Net(options =>
 {
     options.ConfigFile = "Configs/log4net.config";
     options.Watch = true;
+    options.RepositoryName = "MyServiceRepository";
 });
 
 var app = builder.Build();
@@ -97,7 +98,8 @@ public class MyService
 | 属性 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `ConfigFile` | `string` | `"log4net.config"` | 配置文件路径 |
-| `Watch` | `bool` | `true` | 是否监听配置文件变化 |
+| `Watch` | `bool` | `false` | 是否监听配置文件变化 |
+| `RepositoryName` | `string` | `null` | 指定 log4net repository 名称，适合隔离多实例或测试场景 |
 
 ---
 

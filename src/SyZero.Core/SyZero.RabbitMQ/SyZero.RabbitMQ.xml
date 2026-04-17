@@ -147,6 +147,12 @@
             <para>默认值: syzero</para>
             </summary>
         </member>
+        <member name="P:SyZero.RabbitMQ.RabbitMQEventBusOptions.QueueName">
+            <summary>
+            队列名称
+            <para>默认值: null（自动生成）</para>
+            </summary>
+        </member>
         <member name="P:SyZero.RabbitMQ.RabbitMQEventBusOptions.ClientProvidedName">
             <summary>
             客户端提供的名称
@@ -229,6 +235,11 @@
             <summary>
             心跳间隔（秒）
             <para>默认值: 60</para>
+            </summary>
+        </member>
+        <member name="M:SyZero.RabbitMQ.RabbitMQEventBusOptions.Validate">
+            <summary>
+            验证并规范化配置
             </summary>
         </member>
         <member name="T:SyZero.RabbitMQ.RabbitMQPersistentConnection">

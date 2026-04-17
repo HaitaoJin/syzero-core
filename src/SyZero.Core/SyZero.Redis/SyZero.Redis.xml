@@ -222,53 +222,41 @@
             <summary>
             注册RedisModule
             </summary>
-            <typeparam name="TContext"></typeparam>
-            <param name="builder"></param>
-            <param name="configuration"></param>
-            <returns></returns>
+        </member>
+        <member name="M:SyZero.SyZeroRedisExtension.AddSyZeroRedis(Microsoft.Extensions.DependencyInjection.IServiceCollection,Microsoft.Extensions.Configuration.IConfiguration,System.String)">
+            <summary>
+            使用指定配置注册 Redis
+            </summary>
+        </member>
+        <member name="M:SyZero.SyZeroRedisExtension.AddSyZeroRedis(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{SyZero.Redis.RedisOptions})">
+            <summary>
+            使用默认配置并允许额外覆盖注册 Redis
+            </summary>
         </member>
         <member name="M:SyZero.SyZeroRedisExtension.AddRedisServiceManagement(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{SyZero.Redis.RedisServiceManagementOptions})">
             <summary>
             注册 Redis 服务管理
             </summary>
-            <param name="services">服务集合</param>
-            <param name="configureOptions">配置选项</param>
-            <returns></returns>
         </member>
         <member name="M:SyZero.SyZeroRedisExtension.AddRedisServiceManagement(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.String)">
             <summary>
             注册 Redis 服务管理（使用配置节）
             </summary>
-            <param name="services">服务集合</param>
-            <param name="sectionName">配置节名称</param>
-            <returns></returns>
         </member>
         <member name="M:SyZero.SyZeroRedisExtension.AddRedisEventBus(Microsoft.Extensions.DependencyInjection.IServiceCollection,SyZero.Redis.RedisEventBusOptions)">
             <summary>
             注册 Redis 事件总线
             </summary>
-            <param name="services">服务集合</param>
-            <param name="options">配置选项</param>
-            <returns></returns>
         </member>
         <member name="M:SyZero.SyZeroRedisExtension.AddRedisEventBus(Microsoft.Extensions.DependencyInjection.IServiceCollection,Microsoft.Extensions.Configuration.IConfiguration,System.String)">
             <summary>
             注册 Redis 事件总线（从配置读取）
             </summary>
-            <param name="services">服务集合</param>
-            <param name="configuration">配置，为 null 时使用 AppConfig.Configuration</param>
-            <param name="sectionName">配置节名称</param>
-            <returns></returns>
         </member>
         <member name="M:SyZero.SyZeroRedisExtension.AddRedisEventBus(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{SyZero.Redis.RedisEventBusOptions},Microsoft.Extensions.Configuration.IConfiguration,System.String)">
             <summary>
             注册 Redis 事件总线（从配置读取并支持额外配置）
             </summary>
-            <param name="services">服务集合</param>
-            <param name="optionsAction">额外配置委托</param>
-            <param name="configuration">配置，为 null 时使用 AppConfig.Configuration</param>
-            <param name="sectionName">配置节名称</param>
-            <returns></returns>
         </member>
     </members>
 </doc>

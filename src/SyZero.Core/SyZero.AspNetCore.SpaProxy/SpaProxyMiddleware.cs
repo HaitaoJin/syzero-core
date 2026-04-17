@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System;
 using System.IO;
+using System.Net;
 using System.Net.Mime;
 using System.Threading.Tasks;
 
@@ -63,14 +64,21 @@ namespace SyZero.AspNetCore.SpaProxy
             logger.LogInformation("SPA development server is starting for request '{Path}'.", context.Request.Path);
             context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
             context.Response.ContentType = MediaTypeNames.Text.Html;
+            context.Response.Headers.RetryAfter = "2";
             await context.Response.WriteAsync(LaunchPageHtml
-                .Replace("__COMMAND__", serverInfo.LaunchCommand, StringComparison.Ordinal)
-                .Replace("__TARGET__", serverInfo.ServerUrl, StringComparison.Ordinal));
+                .Replace("__COMMAND__", WebUtility.HtmlEncode(serverInfo.LaunchCommand), StringComparison.Ordinal)
+                .Replace("__TARGET__", WebUtility.HtmlEncode(serverInfo.ServerUrl), StringComparison.Ordinal));
         }
 
         private static bool ShouldHandleRequest(HttpContext context)
         {
             if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
+            {
+                return false;
+            }
+
+            if (string.Equals(context.Request.Headers.Connection, "Upgrade", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(context.Request.Headers.Upgrade, "websocket", StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }

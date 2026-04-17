@@ -4,12 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.OpenApi.Models;
-using Ocelot.Cache.CacheManager;
-using Ocelot.DependencyInjection;
-using Ocelot.Middleware;
-using Ocelot.Provider.Consul;
-using Ocelot.Provider.Polly;
+using SyZero.ApiGateway;
 using System.Threading.Tasks;
 
 namespace SyZero.Gateway
@@ -31,24 +26,14 @@ namespace SyZero.Gateway
             }).AddSyZeroLog4Net();
 
             builder.Services.AddSyZeroOpenTelemetry();
-            builder.Services.AddOcelot()
-                .AddConsul<ConsulServiceBuilder>()
-                .AddCacheManager(x =>
-                {
-                    x.WithDictionaryHandle();
-                })
-                .AddPolly()
-                .AddConfigStoredInConsul();
-
-            builder.Services.AddSignalR();
-            builder.Services.AddSwaggerForOcelot(builder.Configuration);
-            builder.Services.AddControllers();
-            builder.Services.AddSwaggerGen(c =>
+            builder.Services.AddSyZeroApiGateway(options =>
             {
-                c.SwaggerDoc("v1", new OpenApiInfo { Title = "My API", Version = "v1" });
-            });
+                options.SwaggerTitle = AppConfig.GetSection("SyZero:Name") ?? "SyZero.Gateway";
+            }, builder.Configuration);
+            builder.Services.AddControllers();
 
             var app = builder.Build();
+            var gatewayOptions = app.Services.GetRequiredService<SyZeroApiGatewayOptions>();
 
             app.UseSyZero();
             if (app.Environment.IsDevelopment())
@@ -56,22 +41,11 @@ namespace SyZero.Gateway
                 app.UseDeveloperExceptionPage();
             }
 
-            app.UseCors(corsBuilder =>
-            {
-                corsBuilder.AllowAnyMethod()
-                    .SetIsOriginAllowed(_ => true)
-                    .AllowAnyHeader()
-                    .AllowCredentials();
-            });
             app.UseRouting();
+            app.UseCors(gatewayOptions.CorsPolicyName);
             app.UseStaticFiles();
             app.MapControllers();
-            app.UseSwaggerForOcelotUI(opt =>
-            {
-                opt.PathToSwaggerGenerator = "/swagger/docs";
-            });
-            app.UseWebSockets();
-            await app.UseOcelot();
+            await app.UseSyZeroApiGatewayAsync();
             await app.RunAsync();
         }
     }

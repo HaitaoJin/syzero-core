@@ -22,6 +22,8 @@ namespace Microsoft.AspNetCore.Builder
         /// </summary>
         public static WebApplication UseSwagger(this WebApplication app, Action<Swashbuckle.AspNetCore.Swagger.SwaggerOptions> setupAction = null, string documentName = "v1")
         {
+            ArgumentNullException.ThrowIfNull(app);
+
             if (app.TryExportSwaggerAsync(GetApplicationArguments(), documentName).GetAwaiter().GetResult())
             {
                 Environment.Exit(0);
@@ -36,6 +38,8 @@ namespace Microsoft.AspNetCore.Builder
         /// </summary>
         public static async Task<bool> TryExportSwaggerAsync(this WebApplication app, string[] args, string documentName = "v1")
         {
+            ArgumentNullException.ThrowIfNull(app);
+
             if (!TryGetSwaggerOutputPath(args, out var swaggerOutputPath))
             {
                 return false;
@@ -50,6 +54,12 @@ namespace Microsoft.AspNetCore.Builder
         /// </summary>
         public static bool TryGetSwaggerOutputPath(string[] args, out string swaggerOutputPath)
         {
+            if (args == null || args.Length == 0)
+            {
+                swaggerOutputPath = string.Empty;
+                return false;
+            }
+
             for (var i = 0; i < args.Length; i++)
             {
                 var arg = args[i];
@@ -61,13 +71,19 @@ namespace Microsoft.AspNetCore.Builder
                         throw new InvalidOperationException($"{SwaggerOutputOptionName} requires a file path.");
                     }
 
-                    swaggerOutputPath = args[i + 1];
+                    swaggerOutputPath = args[i + 1].Trim();
                     return true;
                 }
 
                 if (arg.StartsWith($"{SwaggerOutputOptionName}=", StringComparison.OrdinalIgnoreCase))
                 {
-                    swaggerOutputPath = arg[(SwaggerOutputOptionName.Length + 1)..];
+                    swaggerOutputPath = arg[(SwaggerOutputOptionName.Length + 1)..].Trim();
+
+                    if (string.IsNullOrWhiteSpace(swaggerOutputPath))
+                    {
+                        throw new InvalidOperationException($"{SwaggerOutputOptionName} requires a file path.");
+                    }
+
                     return true;
                 }
             }
@@ -81,6 +97,8 @@ namespace Microsoft.AspNetCore.Builder
         /// </summary>
         public static async Task ExportSwaggerAsync(this WebApplication app, string swaggerOutputPath, string documentName = "v1")
         {
+            ArgumentNullException.ThrowIfNull(app);
+
             var resolvedOutputPath = Path.GetFullPath(swaggerOutputPath, app.Environment.ContentRootPath);
             var outputDirectory = Path.GetDirectoryName(resolvedOutputPath);
 

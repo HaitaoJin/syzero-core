@@ -1,6 +1,5 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using System;
-using System.Text;
 using SyZero.Serialization;
 
 namespace SyZero.Web.Common
@@ -15,7 +14,7 @@ namespace SyZero.Web.Common
             }
             catch (Exception ex)
             {
-                throw new Exception("JSONHelper.JSONToObject(): " + ex.Message);
+                throw new Exception("JSONHelper.JSONToObject(): " + ex.Message, ex);
             }
         }
 
@@ -23,13 +22,11 @@ namespace SyZero.Web.Common
         {
             try
             {
-                byte[] b = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(obj));
-                return Encoding.UTF8.GetString(b);
+                return JsonConvert.SerializeObject(obj);
             }
             catch (Exception ex)
             {
-
-                throw new Exception("JSONHelper.ObjectToJSON(): " + ex.Message);
+                throw new Exception("JSONHelper.ObjectToJSON(): " + ex.Message, ex);
             }
         }
     }

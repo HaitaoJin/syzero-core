@@ -13,7 +13,7 @@ namespace SyZero.Feign
 {
     public class RequestFeignHandler : DelegatingHandler
     {
-        private string _serverName;
+        private readonly string _serverName;
 
         public RequestFeignHandler(string serverName, HttpMessageHandler innerHandler = null) : base(innerHandler ?? new HttpClientHandler())
         {
@@ -22,28 +22,93 @@ namespace SyZero.Feign
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var builder = new UriBuilder(request.RequestUri);
-
-            if (!builder.Path.StartsWith($"{RoutingHelper.ApiUrlPre}/"))
+            if (request.RequestUri == null)
             {
-                var controllerName = "";
-                if (request.Options.TryGetValue(new HttpRequestOptionsKey<TypeInfo>(HttpRequestMessageOptions.InterfaceType), out var interfaceType))
+                throw new InvalidOperationException("请求地址不能为空。");
+            }
+
+            var builder = new UriBuilder(request.RequestUri);
+            var originalPath = builder.Path ?? string.Empty;
+
+            if (!HasApiPrefix(originalPath))
+            {
+                var controllerName = GetControllerName(request);
+                var relativePath = TrimSlashes(RemoveApiPrefix(originalPath));
+                var segments = new List<string> { "api", _serverName };
+
+                if (!string.IsNullOrWhiteSpace(controllerName))
                 {
-                    var interfaceName = RoutingHelper.GetControllerName(interfaceType.Name.Substring(1));
-                    var customApiName = interfaceType.GetSingleAttributeOrDefaultByFullSearch<ApiAttribute>();
-                    controllerName = customApiName?.Name ?? interfaceName;
+                    segments.Add(controllerName);
                 }
 
-                builder.Path = $"/api/{_serverName}/{controllerName}/{builder.Path.RemovePreFix(RoutingHelper.ApiUrlPre)}".RemovePostFix("/");
+                if (!string.IsNullOrWhiteSpace(relativePath))
+                {
+                    segments.Add(relativePath);
+                }
+
+                builder.Path = "/" + string.Join("/", segments);
             }
             else
             {
-                builder.Path = builder.Path.RemovePreFix(RoutingHelper.ApiUrlPre);
+                var relativePath = RemoveApiPrefix(originalPath);
+                builder.Path = string.IsNullOrWhiteSpace(relativePath) ? "/" : EnsureLeadingSlash(relativePath);
             }
 
             request.RequestUri = builder.Uri;
 
             return await base.SendAsync(request, cancellationToken);
+        }
+
+        private static bool HasApiPrefix(string path)
+        {
+            return path.Equals(RoutingHelper.ApiUrlPre, StringComparison.OrdinalIgnoreCase)
+                   || path.StartsWith($"{RoutingHelper.ApiUrlPre}/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string RemoveApiPrefix(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return string.Empty;
+            }
+
+            if (path.Equals(RoutingHelper.ApiUrlPre, StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            if (path.StartsWith($"{RoutingHelper.ApiUrlPre}/", StringComparison.OrdinalIgnoreCase))
+            {
+                return path.Substring(RoutingHelper.ApiUrlPre.Length);
+            }
+
+            return path;
+        }
+
+        private static string EnsureLeadingSlash(string path)
+        {
+            return path.StartsWith("/") ? path : "/" + path;
+        }
+
+        private static string TrimSlashes(string path)
+        {
+            return string.IsNullOrEmpty(path) ? string.Empty : path.Trim('/');
+        }
+
+        private static string GetControllerName(HttpRequestMessage request)
+        {
+            if (!request.Options.TryGetValue(new HttpRequestOptionsKey<TypeInfo>(HttpRequestMessageOptions.InterfaceType), out var interfaceType))
+            {
+                return string.Empty;
+            }
+
+            var interfaceName = interfaceType.Name.StartsWith("I", StringComparison.Ordinal) && interfaceType.Name.Length > 1
+                ? interfaceType.Name.Substring(1)
+                : interfaceType.Name;
+
+            var controllerName = RoutingHelper.GetControllerName(interfaceName);
+            var customApiName = interfaceType.GetSingleAttributeOrDefaultByFullSearch<ApiAttribute>();
+            return customApiName?.Name ?? controllerName;
         }
     }
 }

@@ -1,135 +1,94 @@
 # SyZero.DynamicGrpc
 
-SyZero 框架的动态 gRPC 模块，支持自动生成 gRPC 服务。
+SyZero 的动态 gRPC 模块，基于 `protobuf-net.Grpc.AspNetCore` 自动注册 Code-First gRPC 服务。
 
-## 📦 安装
+## 安装
 
 ```bash
 dotnet add package SyZero.DynamicGrpc
 ```
 
-## ✨ 特性
+## 使用
 
-- 🚀 **动态生成** - 根据应用服务自动生成 gRPC 服务
-- 💾 **无需 Proto** - 无需手动编写 .proto 文件
-- 🔒 **类型安全** - 保持完整的类型检查
+### 1. 定义应用服务
 
----
+```csharp
+using SyZero.Application.Attributes;
+using SyZero.Application.Service;
 
-## 🚀 快速开始
-
-### 1. 配置 appsettings.json
-
-```json
+[DynamicApi]
+public interface IUserAppService : IDynamicApi
 {
-  "DynamicGrpc": {
-    "EnableReflection": true
-  }
+    Task<UserDto> GetUserAsync(long id);
+}
+
+public class UserAppService : IUserAppService
+{
+    public Task<UserDto> GetUserAsync(long id)
+    {
+        return Task.FromResult(new UserDto { Id = id });
+    }
 }
 ```
 
 ### 2. 注册服务
 
 ```csharp
-// Program.cs
 var builder = WebApplication.CreateBuilder(args);
-// 添加SyZero
+
 builder.AddSyZero();
 
-// 注册服务方式1 - 使用默认配置
+// 方式 1：扫描当前已加载的业务程序集
 builder.Services.AddDynamicGrpc();
 
-// 注册服务方式2 - 使用委托配置
-builder.Services.AddDynamicGrpc(options =>
-{
-    options.EnableReflection = true;
-});
-
-// 注册服务方式3 - 指定服务程序集
+// 方式 2：只扫描指定程序集
 builder.Services.AddDynamicGrpc(typeof(UserAppService).Assembly);
 
+// 方式 3：结合配置进一步覆盖选项
+builder.Services.AddDynamicGrpc(options =>
+{
+    options.EnableDetailedErrors = true;
+    options.MaxReceiveMessageSize = 8 * 1024 * 1024;
+});
+```
+
+### 3. 映射端点
+
+```csharp
 var app = builder.Build();
-// 使用SyZero
-app.UseSyZero();
-// 映射 gRPC 服务
-app.MapDynamicGrpcService();
+
+app.MapDynamicGrpcServices();
+
 app.Run();
 ```
 
-### 3. 使用示例
+## 配置
 
-```csharp
-public interface IUserAppService : IApplicationService
+```json
 {
-    Task<UserDto> GetUserAsync(long id);
-    Task<List<UserDto>> GetUsersAsync();
-}
-
-public class UserAppService : IUserAppService
-{
-    public async Task<UserDto> GetUserAsync(long id)
-    {
-        // 实现逻辑
-    }
-
-    public async Task<List<UserDto>> GetUsersAsync()
-    {
-        // 实现逻辑
-    }
+  "DynamicGrpc": {
+    "MaxReceiveMessageSize": 4194304,
+    "MaxSendMessageSize": 4194304,
+    "EnableDetailedErrors": false
+  }
 }
 ```
 
----
+可用配置项：
 
-## 📖 配置选项
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `MaxReceiveMessageSize` | `int?` | 最大接收消息大小，单位字节 |
+| `MaxSendMessageSize` | `int?` | 最大发送消息大小，单位字节 |
+| `EnableDetailedErrors` | `bool` | 是否输出详细错误信息 |
 
-| 属性 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `EnableReflection` | `bool` | `true` | 启用 gRPC 反射 |
+## 约束
 
----
+- 服务实现类型必须是 `public`、非抽象、非泛型类。
+- 服务必须实现 `IDynamicApi`，并通过 `[DynamicApi]` 启用。
+- 标注 `[NonDynamicApi]` 或 `[NonGrpcService]` 的服务不会注册为 gRPC 服务。
+- 标记为 `IFallback` 的类型不会被注册。
 
-## 📖 API 说明
+## 许可证
 
-### IApplicationService 接口
-
-| 方法 | 说明 |
-|------|------|
-| 继承此接口的服务方法 | 自动暴露为 gRPC 方法 |
-
-> 所有公开方法都会自动生成对应的 gRPC 服务方法
-
----
-
-## 🔧 高级用法
-
-### 自定义序列化
-
-```csharp
-builder.Services.AddDynamicGrpc(options =>
-{
-    options.Serializer = new CustomSerializer();
-});
-```
-
-### gRPC 客户端调用
-
-```csharp
-var channel = GrpcChannel.ForAddress("http://localhost:5000");
-var client = channel.CreateGrpcService<IUserAppService>();
-var user = await client.GetUserAsync(1);
-```
-
----
-
-## ⚠️ 注意事项
-
-1. **接口定义** - 服务必须实现 IApplicationService 接口
-2. **返回类型** - 方法返回类型必须是可序列化的
-3. **HTTP/2** - gRPC 需要 HTTP/2 支持
-
----
-
-## 📄 许可证
-
-MIT License - 详见 [LICENSE](../../../LICENSE)
+MIT License

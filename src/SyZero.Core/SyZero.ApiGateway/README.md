@@ -45,25 +45,22 @@ dotnet add package SyZero.ApiGateway
 ```csharp
 // Program.cs
 var builder = WebApplication.CreateBuilder(args);
-// 添加SyZero
 builder.AddSyZero();
+builder.Configuration.AddJsonFile("ocelot.json", optional: false, reloadOnChange: true);
 
-// 注册服务方式1 - 使用配置文件
-builder.Configuration.AddJsonFile("ocelot.json");
-builder.Services.AddOcelot();
-
-// 注册服务方式2 - 添加 Polly 熔断
-builder.Services.AddOcelot()
-    .AddPolly();
-
-// 注册服务方式3 - 添加 Consul 服务发现
-builder.Services.AddOcelot()
-    .AddConsul();
+builder.Services.AddSyZeroApiGateway(options =>
+{
+    options.SwaggerTitle = "SyZero.Gateway";
+}, builder.Configuration);
+builder.Services.AddControllers();
 
 var app = builder.Build();
-// 使用SyZero
 app.UseSyZero();
-app.UseOcelot().Wait();
+
+app.UseRouting();
+app.UseCors(SyZeroApiGatewayOptions.DefaultCorsPolicyName);
+app.MapControllers();
+await app.UseSyZeroApiGatewayAsync();
 app.Run();
 ```
 
@@ -108,12 +105,13 @@ app.Run();
 ### Swagger 文档聚合
 
 ```csharp
-builder.Services.AddSwaggerForOcelot(builder.Configuration);
-
-app.UseSwaggerForOcelotUI(opt =>
+builder.Services.AddSyZeroApiGateway(options =>
 {
-    opt.PathToSwaggerGenerator = "/swagger/docs";
-});
+    options.SwaggerTitle = "SyZero.Gateway";
+    options.SwaggerGeneratorPath = "/swagger/docs";
+}, builder.Configuration);
+
+await app.UseSyZeroApiGatewayAsync();
 ```
 
 ### 自定义中间件
@@ -127,9 +125,9 @@ builder.Services.AddOcelot()
 
 ## ⚠️ 注意事项
 
-1. **配置文件** - ocelot.json 必须单独配置，不能合并到 appsettings.json
-2. **服务发现** - 使用服务发现时需要配置对应的服务注册中心
-3. **熔断配置** - QoS 配置需要与 Polly 配合使用
+1. **配置文件** - 建议将网关路由单独放在 `ocelot.json` 或 `configuration.json`
+2. **CORS** - `SyZero:CorsOrigins` 会自动注册命名 CORS 策略，未配置时默认退化为匿名跨域
+3. **服务发现** - 启用 Consul 时会优先使用服务实例地址作为下游主机名
 
 ---
 

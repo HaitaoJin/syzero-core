@@ -36,7 +36,7 @@ jobs:
         run: dotnet build --configuration Release ./SyZero.slnx --no-restore
 
       - name: Create the package
-        run: dotnet pack --configuration Release ./SyZero.slnx --no-restore
+        run: dotnet pack --configuration Release ./SyZero.slnx --no-restore --output ./nuget
 
       - name: Upload package
         uses: actions/upload-artifact@v4
@@ -45,6 +45,7 @@ jobs:
           path: |
             ./nuget/*.nupkg
             ./nuget/*.snupkg
+          if-no-files-found: error
 
       - name: Get Release Note
         id: get_releasenote

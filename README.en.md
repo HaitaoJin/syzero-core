@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/HaitaoJin/syzero-core"><img src="https://img.shields.io/github/stars/HaitaoJin/syzero-core?style=flat-square" alt="GitHub Stars"/></a>
-  <a href="https://github.com/HaitaoJin/syzero-core/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"/></a>
+  <a href="https://github.com/HaitaoJin/SyZero"><img src="https://img.shields.io/github/stars/HaitaoJin/SyZero?style=flat-square" alt="GitHub Stars"/></a>
+  <a href="https://github.com/HaitaoJin/SyZero/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"/></a>
   <a href="https://www.nuget.org/packages/SyZero"><img src="https://img.shields.io/nuget/v/SyZero?style=flat-square" alt="NuGet"/></a>
   <a href="https://docs.syzero.com/"><img src="https://img.shields.io/badge/docs-docs.syzero.com-green?style=flat-square" alt="Documentation"/></a>
 </p>
@@ -211,7 +211,7 @@ SyZero provides a unified `IEventBus` abstraction:
 ## Project Structure
 
 ```text
-syzero-core/
+SyZero/
 ├── src/
 │   ├── SyZero.Core/                    # Core modules
 │   │   ├── SyZero/                     # Core library

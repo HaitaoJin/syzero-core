@@ -17,7 +17,7 @@ hero:
       link: /modules/index
     - theme: alt
       text: GitHub
-      link: https://github.com/HaitaoJin/syzero-core
+      link: https://github.com/HaitaoJin/SyZero
 
 features:
   - title: 模块化装配

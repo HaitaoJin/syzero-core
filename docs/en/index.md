@@ -17,7 +17,7 @@ hero:
       link: /en/modules/index
     - theme: alt
       text: GitHub
-      link: https://github.com/HaitaoJin/syzero-core
+      link: https://github.com/HaitaoJin/SyZero
 
 features:
   - title: Modular by design

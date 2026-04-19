@@ -35,7 +35,7 @@ export default defineConfig({
     logo: "/icon/logo.png",
     outline: { level: [2, 3], label: "页面导航" },
     socialLinks: [
-      { icon: "github", link: "https://github.com/HaitaoJin/syzero-core" },
+      { icon: "github", link: "https://github.com/HaitaoJin/SyZero" },
     ],
     search: {
       provider: "local"
@@ -51,7 +51,7 @@ export default defineConfig({
           { text: "指南", link: "/guide/getting-started" },
           { text: "模块", link: "/modules/index" },
           { text: "发布说明", link: "/release-notes" },
-          { text: "GitHub", link: "https://github.com/HaitaoJin/syzero-core" },
+          { text: "GitHub", link: "https://github.com/HaitaoJin/SyZero" },
         ],
         sidebar: {
           "/guide/": [
@@ -89,7 +89,7 @@ export default defineConfig({
           { text: "Guide", link: "/en/guide/getting-started" },
           { text: "Modules", link: "/en/modules/index" },
           { text: "Release Notes", link: "/en/release-notes" },
-          { text: "GitHub", link: "https://github.com/HaitaoJin/syzero-core" },
+          { text: "GitHub", link: "https://github.com/HaitaoJin/SyZero" },
         ],
         sidebar: {
           "/en/guide/": [

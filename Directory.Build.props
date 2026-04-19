@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <Version Condition=" '$(BUILD_BUILDNUMBER)' == '' ">1.1.6</Version>
+    <Version Condition=" '$(BUILD_BUILDNUMBER)' == '' ">1.1.9</Version>
     <Version Condition=" '$(BUILD_BUILDNUMBER)' != '' ">$(BUILD_BUILDNUMBER)</Version>
     <DocumentationFile Condition=" '$(DocumentationFile)' == '' ">$(MSBuildProjectName).xml</DocumentationFile>
     <PackageOutputPath>$(SyZeroRootPath)nuget</PackageOutputPath>
@@ -21,7 +21,7 @@
     <PackageId Condition=" '$(PackageId)' == '' ">$(MSBuildProjectName)</PackageId>
     <PackageIcon Condition="Exists('$(SyZeroLogoPath)')">logo.png</PackageIcon>
     <PackageLicenseFile Condition="Exists('$(SyZeroLicensePath)')">LICENSE</PackageLicenseFile>
-    <RepositoryUrl>https://github.com/HaitaoJin/syzero-core</RepositoryUrl>
+    <RepositoryUrl>https://github.com/HaitaoJin/SyZero</RepositoryUrl>
     <RepositoryType>git</RepositoryType>  
     <PackageReadmeFile Condition="Exists('$(SyZeroModuleReadmePath)')">README.md</PackageReadmeFile>
     <PackageProjectUrl>https://docs.syzero.com/modules/</PackageProjectUrl>
